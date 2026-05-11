@@ -22,6 +22,7 @@
         .three-container:active { cursor: grabbing; }
         .nav-fab { position: fixed; right: 20px; bottom: 30px; display: flex; flex-direction: column; gap: 12px; z-index: 9990; }
         .fab-btn { width: 50px; height: 50px; border-radius: 25px; background: #4f46e5; color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: all 0.3s; cursor: pointer; }
+        .fab-btn.disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; box-shadow: none; pointer-events: none; }
         #toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(30, 41, 59, 0.9); color: white; padding: 12px 24px; border-radius: 50px; font-weight: bold; font-size: 14px; opacity: 0; pointer-events: none; transition: all 0.3s ease; z-index: 9999; }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         .loc-input { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; color: #1e293b; font-size: 14px; width: 100%; transition: border-color 0.2s; }
@@ -61,8 +62,8 @@
     </div>
 
     <div class="nav-fab">
-        <button onclick="scrollToCard('prev')" class="fab-btn"><i class="fas fa-chevron-up"></i></button>
-        <button onclick="scrollToCard('next')" class="fab-btn"><i class="fas fa-chevron-down"></i></button>
+        <button id="btnScrollUp" onclick="scrollToCard('prev')" class="fab-btn disabled"><i class="fas fa-chevron-up"></i></button>
+        <button id="btnScrollDown" onclick="scrollToCard('next')" class="fab-btn"><i class="fas fa-chevron-down"></i></button>
     </div>
 
     <div id="toast"></div>
@@ -152,6 +153,13 @@
             <p class="text-indigo-600 text-sm font-bold animate-pulse">기상 데이터 및 궤도를 분석 중입니다...</p>
         </div>
 
+        <!-- 다음 관측 타이머 영역 추가 -->
+        <div id="countdownContainer" class="hidden glass-card p-8 mb-8 text-center bg-gradient-to-r from-indigo-500 to-blue-600 text-white shadow-lg shadow-indigo-500/30">
+            <div class="text-xs font-bold uppercase tracking-widest text-indigo-100 mb-2">다음 관측까지 남은 시간</div>
+            <div id="countdownTimer" class="text-5xl md:text-6xl font-black tabular-nums tracking-tight">--:--:--</div>
+            <div id="countdownTarget" class="text-sm font-medium mt-3 text-indigo-100"></div>
+        </div>
+
         <div id="contentArea" class="space-y-8"></div>
     </div>
 
@@ -177,13 +185,45 @@
         
         let globalTles = { ISS: null, CSS: null };
         let trackingInterval = null; 
+        let countdownInterval = null; // 카운트다운 타이머 변수 추가
         let globalRenderer, isAnimating = false;
 
         window.onload = () => {
             loadLocations();
             initMap();
             startGlobalAnimation();
+            updateFabState(); // 초기 스크롤 버튼 상태 설정
         };
+
+        // 스크롤 상/하단 버튼 비활성화 제어 로직 (개선됨)
+        function updateFabState() {
+            const btnUp = document.getElementById('btnScrollUp');
+            const btnDown = document.getElementById('btnScrollDown');
+            if(!btnUp || !btnDown) return;
+            
+            const cs = Array.from(document.querySelectorAll('.pass-card'));
+            const vt = window.scrollY + 120;
+            
+            // 위로 갈 카드가 있는지 확인 (첫 번째 데이터보다 위로 가면 비활성화)
+            const prevCard = cs.slice().reverse().find(c => c.offsetTop < vt - 100);
+            if (!prevCard || window.scrollY <= 20) {
+                btnUp.classList.add('disabled');
+            } else {
+                btnUp.classList.remove('disabled');
+            }
+            
+            // 아래로 갈 카드가 있는지 확인 (또는 페이지 최하단 도달 시 비활성화)
+            const nextCard = cs.find(c => c.offsetTop > vt);
+            const isBottom = Math.ceil(window.innerHeight + window.scrollY) >= document.documentElement.scrollHeight - 50;
+            
+            if (!nextCard || isBottom) {
+                btnDown.classList.add('disabled');
+            } else {
+                btnDown.classList.remove('disabled');
+            }
+        }
+        window.addEventListener('scroll', updateFabState);
+        window.addEventListener('resize', updateFabState);
 
         async function startApp() {
             const overlay = document.getElementById('startOverlay');
@@ -323,7 +363,8 @@
 
         async function fetchWeatherData(lat, lng) {
             try {
-                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,cloudcover,wind_speed_10m,visibility&timezone=auto`);
+                // forecast_days=16 파라미터를 추가하여 API가 제공하는 최대 기간(16일)의 예보 데이터를 요청합니다.
+                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,cloudcover,wind_speed_10m,visibility&timezone=auto&forecast_days=16`);
                 if (!res.ok) throw new Error("Weather API Error");
                 const data = await res.json();
                 if (data && data.hourly) {
@@ -345,14 +386,32 @@
 
         function getClosestWeather(timestamp) {
             if (!weatherData || weatherData.length === 0) return null;
-            return weatherData.reduce((prev, curr) => 
+            const closest = weatherData.reduce((prev, curr) => 
                 Math.abs(curr.time - timestamp) < Math.abs(prev.time - timestamp) ? curr : prev
             );
+            
+            // 관측 시간과 가장 가까운 예보 시간의 차이가 12시간 이상이면 예보 범위를 벗어난 것으로 확실하게 간주합니다.
+            if (Math.abs(closest.time - timestamp) > 12 * 60 * 60 * 1000) return null;
+
+            return closest;
         }
 
         function getWeatherUI(timestamp) {
             const w = getClosestWeather(timestamp);
-            if (!w) return `<span class="text-gray-400 text-[10px]">날씨 정보 수집 실패</span>`;
+            
+            // 예보 데이터가 없을 경우 (예보 한계인 16일을 초과한 미래)
+            if (!w) {
+                return `
+                <div class="flex flex-col items-end gap-1">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-calendar-times text-slate-300 text-xl opacity-70"></i>
+                        <div class="text-right">
+                            <div class="text-xs font-black text-slate-400">예보 범위 밖</div>
+                            <div class="text-[10px] text-slate-400">먼 미래 일정</div>
+                        </div>
+                    </div>
+                </div>`;
+            }
             
             let icon = 'fa-sun'; let color = 'text-yellow-500'; let label = '맑음';
             let score = 0;
@@ -662,8 +721,48 @@
             };
         }
 
+        // 카운트다운 타이머 제어 함수
+        function startCountdown(passes) {
+            if (countdownInterval) clearInterval(countdownInterval);
+            const container = document.getElementById('countdownContainer');
+            const timerEl = document.getElementById('countdownTimer');
+            const targetEl = document.getElementById('countdownTarget');
+            
+            if (!container || !timerEl || !targetEl) return;
+
+            const now = Date.now();
+            // 현재 시간 이후의 가장 가까운 관측 일정 찾기
+            const nextPass = passes.find(p => p.rawStartMs > now);
+
+            if (!nextPass) {
+                container.classList.add('hidden');
+                return;
+            }
+            
+            container.classList.remove('hidden');
+            targetEl.innerHTML = `<i class="fas ${nextPass.type === 'ISS' ? 'fa-globe text-blue-200' : 'fa-rocket text-red-200'} mr-1"></i> <strong>${nextPass.type}</strong> (${nextPass.date} ${nextPass.startTime})`;
+
+            const updateClock = () => {
+                const diff = nextPass.rawStartMs - Date.now();
+                if (diff <= 0) {
+                    timerEl.innerText = "관측 시작!";
+                    clearInterval(countdownInterval);
+                    setTimeout(updateData, 60000); // 관측 시작 1분 후 데이터 자동 갱신
+                    return;
+                }
+                const h = Math.floor(diff / 3600000);
+                const m = Math.floor((diff % 3600000) / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                timerEl.innerText = `${h.toString().padStart(2, '0')} : ${m.toString().padStart(2, '0')} : ${s.toString().padStart(2, '0')}`;
+            };
+            
+            updateClock();
+            countdownInterval = setInterval(updateClock, 1000);
+        }
+
         async function updateData() {
             const b = document.getElementById('updateBtn'), i = document.getElementById('refreshIcon'), l = document.getElementById('loadingArea'), c = document.getElementById('contentArea');
+            const cdContainer = document.getElementById('countdownContainer');
             const laInput = document.getElementById('locLat'), loInput = document.getElementById('locLng');
             if (!laInput || !loInput) return;
             
@@ -678,6 +777,8 @@
             
             if (b) b.disabled = true; if (i) i.classList.add('fa-spin'); 
             if (l) l.classList.remove('hidden'); if (c) c.innerHTML = ""; 
+            if (cdContainer) cdContainer.classList.add('hidden');
+            if (countdownInterval) clearInterval(countdownInterval);
             activeScenes = [];
 
             try {
@@ -715,6 +816,9 @@
                 c.innerHTML = "<div class='glass-card p-12 text-center text-slate-500 font-bold'>선택한 기간 내 관측 가능한 일정이 없습니다.</div>"; 
                 return; 
             }
+
+            // 카운트다운 타이머 시작
+            startCountdown(currentRenderedPasses);
             
             c.innerHTML = currentRenderedPasses.map((p, idx) => `
                 <div class="glass-card pass-card mb-8">
@@ -749,9 +853,13 @@
                     </div>
                 </div>`).join('');
                 
-            setTimeout(() => currentRenderedPasses.forEach((p, i) => {
-                init3DScene(`chart-3d-${i}`, p);
-            }), 100);
+            setTimeout(() => {
+                currentRenderedPasses.forEach((p, i) => {
+                    init3DScene(`chart-3d-${i}`, p);
+                });
+                // 데이터 렌더링이 끝나고 페이지 길이가 늘어난 후 스크롤 상태 재계산
+                updateFabState();
+            }, 100);
         }
 
         // --- 상세 궤도 지도 시각화 (2D) ---
@@ -996,15 +1104,97 @@
             });
 
             const s = { container, canvas2d, ctx, scene, camera: cam, worldGroup: wg, targetRotY: 0, prevX: 0, isDragging: false };
+            
+            // --- 줌 및 나침반 정렬 기능 추가 ---
+            let currentZoom = 1;
+            let initialPinchDist = null;
+            let lastTapTime = 0;
+
+            const applyZoom = (zoomDelta) => {
+                currentZoom += zoomDelta;
+                currentZoom = Math.max(0.5, Math.min(currentZoom, 4)); 
+                cam.zoom = currentZoom;
+                cam.updateProjectionMatrix();
+            };
+
+            // 데스크탑 휠 확대/축소
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                applyZoom(e.deltaY * -0.002);
+            }, { passive: false });
+
+            // 나침반 권한 요청 및 정렬 로직
+            const handleDoubleTap = async () => {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        const perm = await DeviceOrientationEvent.requestPermission();
+                        if (perm !== 'granted') {
+                            showToast("나침반 센서 권한이 필요합니다.", "red");
+                            return;
+                        }
+                    } catch(e){}
+                }
+                const orientationHandler = (e) => {
+                    let heading = null;
+                    if (e.webkitCompassHeading) heading = e.webkitCompassHeading;
+                    else if (e.alpha !== null) heading = 360 - e.alpha; // 안드로이드 호환
+                    
+                    if (heading !== null) {
+                        s.targetRotY = heading * Math.PI / 180;
+                        showToast("휴대폰 방향으로 3D 뷰가 정렬되었습니다.");
+                    }
+                    window.removeEventListener('deviceorientation', orientationHandler);
+                };
+                window.addEventListener('deviceorientation', orientationHandler);
+            };
+
+            const checkDoubleTap = () => {
+                const now = Date.now();
+                if (now - lastTapTime < 300) handleDoubleTap();
+                lastTapTime = now;
+            };
+
+            // 데스크탑 더블 클릭 지원
+            container.addEventListener('dblclick', handleDoubleTap);
+
             const onDown = (x) => { s.isDragging = true; s.prevX = x; };
             const onMove = (x) => { if (s.isDragging) { s.targetRotY += (x - s.prevX) * 0.015; s.prevX = x; } };
-            const onUp = () => { s.isDragging = false; };
+            const onUp = () => { s.isDragging = false; initialPinchDist = null; };
+
             container.addEventListener('mousedown', (e) => onDown(e.clientX));
             window.addEventListener('mousemove', (e) => onMove(e.clientX));
             window.addEventListener('mouseup', onUp);
-            container.addEventListener('touchstart', (e) => onDown(e.touches[0].clientX));
-            window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX));
-            window.addEventListener('touchend', onUp);
+            
+            // 터치 시작 (스와이프 회전 처리)
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) onDown(e.touches[0].clientX);
+            }, {passive: false});
+            
+            // 터치 이동 (핀치 줌 및 스와이프 회전 처리)
+            container.addEventListener('touchmove', (e) => {
+                e.preventDefault(); // 스크롤 방지
+                if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (initialPinchDist === null) {
+                        initialPinchDist = dist;
+                    } else {
+                        applyZoom((dist - initialPinchDist) * 0.01);
+                        initialPinchDist = dist;
+                    }
+                    s.isDragging = false;
+                } else if (e.touches.length === 1 && s.isDragging) {
+                    onMove(e.touches[0].clientX);
+                }
+            }, {passive: false});
+            
+            // 터치 종료 (더블 탭 판정)
+            container.addEventListener('touchend', (e) => {
+                if (e.changedTouches.length === 1 && e.touches.length === 0) checkDoubleTap();
+                onUp();
+            });
+
             activeScenes.push(s);
         }
 
