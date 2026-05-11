@@ -395,7 +395,8 @@
                 const la = document.getElementById('locLat'), lo = document.getElementById('locLng'), na = document.getElementById('locName');
                 if (la) la.value = p.coords.latitude.toFixed(4);
                 if (lo) lo.value = p.coords.longitude.toFixed(4);
-                if (na && (!na.value || na.value.includes("새 위치"))) na.value = "현재 내 위치";
+                // 기존 이름 여부와 상관없이 무조건 '현위치'로 변경합니다.
+                if (na) na.value = "현위치";
                 showToast("위치 정보를 가져왔습니다.");
                 
                 if (locSelectionMap && locSelectionMarker) {
