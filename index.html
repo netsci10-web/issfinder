@@ -32,6 +32,7 @@
 </head>
 <body class="min-h-screen p-4 md:p-8 pb-24">
 
+    <!-- 시작 안내 오버레이 -->
     <div id="startOverlay" class="fixed inset-0 z-[10000] flex items-center justify-center bg-white bg-opacity-90 backdrop-blur-md transition-opacity duration-500">
         <div class="glass-card p-8 text-center max-w-sm mx-4">
             <div class="w-20 h-20 mx-auto bg-indigo-500/10 rounded-full flex items-center justify-center mb-6 border border-indigo-500/20">
@@ -78,6 +79,7 @@
         </header>
 
         <div id="locationSettingsPanel" class="glass-card p-6 mb-6 hidden">
+            <!-- 지도에서 위치 선택 영역 -->
             <div class="mb-4">
                 <span class="text-[10px] text-slate-400 font-black mb-2 block"><i class="fas fa-map-marked-alt mr-1"></i>지도에서 클릭하여 위치 선택</span>
                 <div id="locSelectionMap" class="w-full h-48 md:h-64 rounded-xl border border-slate-200 z-10 relative" style="background: #e5e7eb;"></div>
@@ -103,6 +105,7 @@
                     <i class="fas fa-eraser"></i> 비우기
                  </button>
             </div>
+            
             <div id="savedLocationsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
         </div>
 
@@ -146,7 +149,7 @@
 
         <div id="loadingArea" class="hidden flex flex-col items-center justify-center py-24 glass-card mb-10">
             <div class="loading-spinner mb-6"></div>
-            <p class="text-indigo-600 text-sm font-bold animate-pulse">데이터 및 기상정보를 분석 중입니다...</p>
+            <p class="text-indigo-600 text-sm font-bold animate-pulse">기상 데이터 및 궤도를 분석 중입니다...</p>
         </div>
 
         <div id="contentArea" class="space-y-8"></div>
@@ -334,7 +337,9 @@
                         visibility: data.hourly.visibility[idx]
                     }));
                 }
-            } catch (e) { console.error("기상 정보 획득 실패:", e); }
+            } catch (e) { 
+                console.error("기상 정보를 가져오는 중 오류 발생:", e); 
+            }
             return [];
         }
 
@@ -847,7 +852,7 @@
                     brng = getBearingForSwath(lat, lng, satellite.degreesLat(ngd.latitude), satellite.degreesLong(ngd.longitude));
                 }
                 
-                // 궤도 띠 반경 (시각적으로 잘 보이도록 25km 두께로 설정)
+                // 궤도 띠 반경
                 const distKm = 25; 
                 curLefts.push(getDestPointForSwath(lat, lng, brng - 90, distKm));
                 curRights.push(getDestPointForSwath(lat, lng, brng + 90, distKm));
@@ -884,7 +889,8 @@
             const addL = (txt, pos) => { const l = createTextSprite(txt, 'rgba(71, 85, 105, 0.6)', 40); l.position.copy(pos); wg.add(l); };
             addL('N', new THREE.Vector3(0,0,-9)); addL('S', new THREE.Vector3(0,0,9)); addL('E', new THREE.Vector3(9,0,0)); addL('W', new THREE.Vector3(-9,0,0));
 
-            // 물리 시뮬레이션 기반의 완벽한 3D 곡선 계산 로직 (관측 위치 기준)
+            const maxA = parseFloat(p.alt);
+
             const satrec = satellite.twoline2satrec(p.tle[0], p.tle[1]);
             const obs = { longitude: p.obsLng*Math.PI/180, latitude: p.obsLat*Math.PI/180, height: 0.1 };
             const R = 8;
@@ -916,7 +922,6 @@
             const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(highResPoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2 }));
             line.computeLineDistances(); wg.add(line);
 
-            // 관측자 위치(원점) 마커 생성
             const obsPos = new THREE.Vector3(0, 0, 0);
             const obsDot = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x22c55e }));
             wg.add(obsDot);
@@ -924,19 +929,16 @@
             obsLabel.position.set(0, -0.6, 0);
             wg.add(obsLabel);
 
-            // 주요 지점(정점, 시작점, 끝점) 계산
             const pPeak = get3DPosAtTime(p.rawPeakMs);
             const p1 = curvePoints[0];
             const p3 = curvePoints[curvePoints.length - 1];
 
-            // 관측자에서 정점까지의 주황색 점선 연결 및 고도(각도) 텍스트 표시
             const peakLineGeom = new THREE.BufferGeometry().setFromPoints([obsPos, pPeak]);
             const peakLineMat = new THREE.LineDashedMaterial({ color: 0xf59e0b, dashSize: 0.3, gapSize: 0.2 });
             const peakLine = new THREE.Line(peakLineGeom, peakLineMat);
             peakLine.computeLineDistances();
             wg.add(peakLine);
 
-            // 시각적 이해도를 높이기 위한 바닥 보조선 (직각 삼각형 형태)
             const pGround = new THREE.Vector3(pPeak.x, 0, pPeak.z);
             const groundLineGeom = new THREE.BufferGeometry().setFromPoints([obsPos, pGround, pPeak]);
             const groundLineMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 0.2, gapSize: 0.2 });
@@ -944,16 +946,14 @@
             groundLine.computeLineDistances();
             wg.add(groundLine);
 
-            // 관측자 쪽에 각도 표시(호) 그리기
             const maxAngleRad = maxA * Math.PI / 180;
-            const arcRadius = 1.8; // 관측자로부터 각도 호까지의 거리
+            const arcRadius = 1.8; 
             const arcPoints = [];
             const vecGround = pGround.clone().normalize();
             const vecPeak = pPeak.clone().normalize();
             
-            // 회전축 계산 (바닥 벡터와 정점 벡터에 수직)
             const axis = new THREE.Vector3().crossVectors(vecGround, vecPeak).normalize();
-            if (axis.lengthSq() < 0.001) axis.set(1, 0, 0); // 90도 수직일 경우 예외 처리
+            if (axis.lengthSq() < 0.001) axis.set(1, 0, 0); 
 
             for (let i = 0; i <= 20; i++) {
                 const theta = (i / 20) * maxAngleRad;
@@ -966,7 +966,6 @@
             const angleArc = new THREE.Line(arcGeom, arcMat);
             wg.add(angleArc);
 
-            // 각도 텍스트를 각도 표시선(호) 바로 옆에 배치
             const midTheta = maxAngleRad / 2;
             const labelPos = vecGround.clone().applyAxisAngle(axis, midTheta).multiplyScalar(arcRadius + 0.8);
             const altLabel = createTextSprite(`${maxA}°`, '#f59e0b', 50);
@@ -974,7 +973,30 @@
             wg.add(altLabel);
 
             const pb = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({ color: 0xf59e0b })); pb.position.copy(pPeak); wg.add(pb);
-            const peakLabel = createTextSprite(peakTime, '#f59e0b', 34); peakLabel.position.set(pPeak.x, pPeak.y + 1, pPeak.z); wg.add(peakLabel);
+            const peakLabel = createTextSprite(p.peakTime, '#f59e0b', 34); peakLabel.position.set(pPeak.x, pPeak.y + 1, pPeak.z); wg.add(peakLabel);
+            
+            const p1Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x3b82f6 })); p1Dot.position.copy(p1); wg.add(p1Dot);
+            const startLabel = createTextSprite(p.startTime, '#3b82f6', 28); startLabel.position.set(p1.x, p1.y - 1, p1.z); wg.add(startLabel);
+            
+            const p3Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x64748b })); p3Dot.position.copy(p3); wg.add(p3Dot);
+            const endLabel = createTextSprite(p.endTime, '#64748b', 28); endLabel.position.set(p3.x, p3.y - 1, p3.z); wg.add(endLabel);
+
+            [15, 45].forEach(idx => {
+                const pos = highResPoints[idx]; const nextPos = highResPoints[idx+1];
+                const dir = new THREE.Vector3().subVectors(nextPos, pos).normalize();
+                const arrow = new THREE.ArrowHelper(dir, pos, 1.2, 0x4f46e5, 0.4, 0.3); wg.add(arrow);
+            });
+
+            const s = { container, canvas2d, ctx, scene, camera: cam, worldGroup: wg, targetRotY: 0, prevX: 0, isDragging: false };
+            const onDown = (x) => { s.isDragging = true; s.prevX = x; };
+            const onMove = (x) => { if (s.isDragging) { s.targetRotY += (x - s.prevX) * 0.015; s.prevX = x; } };
+            const onUp = () => { s.isDragging = false; };
+            container.addEventListener('mousedown', (e) => onDown(e.clientX));
+            window.addEventListener('mousemove', (e) => onMove(e.clientX));
+            window.addEventListener('mouseup', onUp);
+            container.addEventListener('touchstart', (e) => onDown(e.touches[0].clientX));
+            window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX));
+            window.addEventListener('touchend', onUp);
             activeScenes.push(s);
         }
 
