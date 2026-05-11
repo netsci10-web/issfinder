@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우주정거장 파인더</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.1.4/satellite.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        body { font-family: 'Pretendard', sans-serif; background: #f8fafc; color: #1e293b; overflow-x: hidden; }
+        .glass-card { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(16px); border: 1px solid rgba(226, 232, 240, 0.8); border-radius: 24px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .station-btn.active, .period-btn.active { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); color: white; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3); }
+        .loading-spinner { border: 3px solid rgba(79, 70, 229, 0.1); border-left-color: #4f46e5; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .three-container { width: 100%; height: 350px; background: radial-gradient(circle at center, #ffffff 0%, #e2e8f0 100%); position: relative; cursor: grab; touch-action: none; }
+        .three-container:active { cursor: grabbing; }
+        .nav-fab { position: fixed; right: 20px; bottom: 30px; display: flex; flex-direction: column; gap: 12px; z-index: 9990; }
+        .fab-btn { width: 50px; height: 50px; border-radius: 25px; background: #4f46e5; color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: all 0.3s; cursor: pointer; }
+        #toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(30, 41, 59, 0.9); color: white; padding: 12px 24px; border-radius: 50px; font-weight: bold; font-size: 14px; opacity: 0; pointer-events: none; transition: all 0.3s ease; z-index: 9999; }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .loc-input { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; color: #1e293b; font-size: 14px; width: 100%; transition: border-color 0.2s; }
+        .saved-loc-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; transition: all 0.2s; padding: 12px; cursor: pointer; }
+        .saved-loc-card:hover { border-color: #4f46e5; background: #f8fafc; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 pb-24">
+
+    <div id="startOverlay" class="fixed inset-0 z-[10000] flex items-center justify-center bg-white bg-opacity-90 backdrop-blur-md transition-opacity duration-500">
+        <div class="glass-card p-8 text-center max-w-sm mx-4">
+            <div class="w-20 h-20 mx-auto bg-indigo-500/10 rounded-full flex items-center justify-center mb-6 border border-indigo-500/20">
+                <i class="fas fa-compass text-4xl text-indigo-600 animate-pulse"></i>
+            </div>
+            <h2 class="text-2xl font-black text-slate-800 mb-3">정밀 관측 준비</h2>
+            <p class="text-sm text-slate-500 mb-8 leading-relaxed">우주정거장의 실시간 위치와<br/>폰 방향이 연동된 3D 궤도를 확인해 보세요.</p>
+            <button onclick="startApp()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-all mb-3">시작하기</button>
+            <button onclick="closeOverlayOnly()" class="text-xs text-slate-400 underline p-2">나침반 없이 시작</button>
+        </div>
+    </div>
+
+    <div class="nav-fab">
+        <button onclick="scrollToCard('prev')" class="fab-btn"><i class="fas fa-chevron-up"></i></button>
+        <button onclick="scrollToCard('next')" class="fab-btn"><i class="fas fa-chevron-down"></i></button>
+    </div>
+
+    <div id="toast"></div>
+
+    <div class="max-w-5xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-black text-slate-900 mb-2 tracking-tighter">우주정거장 파인더</h1>
+            <p id="headerLocDesc" class="text-slate-500 text-sm font-medium">위치 탐색 중...</p>
+            <div class="mt-6 mb-2">
+                <button onclick="toggleLocationSettings()" id="btnToggleSettings" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black py-3.5 px-8 rounded-full shadow-lg transition-all inline-flex items-center gap-2">
+                    <i class="fas fa-cog"></i> 관측 위치 변경
+                </button>
+            </div>
+        </header>
+
+        <div id="locationSettingsPanel" class="glass-card p-6 mb-6 hidden">
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 mb-4">
+                <div class="md:col-span-3"><input type="text" id="locName" class="loc-input h-full" placeholder="위치 이름"></div>
+                <div class="md:col-span-3"><input type="number" id="locLat" class="loc-input h-full" placeholder="위도" step="0.0001"></div>
+                <div class="md:col-span-3"><input type="number" id="locLng" class="loc-input h-full" placeholder="경도" step="0.0001"></div>
+                <div class="md:col-span-3">
+                    <button onclick="applyInputLocation()" class="w-full h-full bg-indigo-600 text-white text-sm font-bold py-3 px-4 rounded-xl shadow-md">위치 반영</button>
+                </div>
+            </div>
+            <div id="savedLocationsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+        </div>
+
+        <div class="glass-card p-6 mb-6">
+            <div id="realtimeMap" class="w-full h-64 md:h-80 rounded-xl border border-slate-200" style="background: #e5e7eb;"></div>
+            <div class="flex flex-col md:flex-row justify-between mt-4 text-xs font-bold gap-3">
+                <span id="issCurrentLoc" class="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100 flex-1 text-center">ISS 데이터 대기 중...</span>
+                <span id="cssCurrentLoc" class="bg-red-50 text-red-600 p-3 rounded-xl border border-red-100 flex-1 text-center">CSS 데이터 대기 중...</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-10">
+            <div class="glass-card p-6 lg:col-span-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <span class="text-[10px] text-slate-400 font-black mb-3 block">Satellite</span>
+                        <div class="flex gap-2">
+                            <button onclick="changeStation('ALL')" id="btnALL" class="station-btn active flex-1 py-3 rounded-2xl text-sm font-bold">모두</button>
+                            <button onclick="changeStation('ISS')" id="btnISS" class="station-btn flex-1 py-3 rounded-2xl text-sm font-bold bg-slate-100 text-slate-500">ISS</button>
+                            <button onclick="changeStation('CSS')" id="btnCSS" class="station-btn flex-1 py-3 rounded-2xl text-sm font-bold bg-slate-100 text-slate-500">CSS</button>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-400 font-black mb-3 block">Period</span>
+                        <div class="flex gap-2">
+                            <button onclick="changePeriod(7)" id="p1" class="period-btn active flex-1 py-3 rounded-2xl text-xs font-bold">1주</button>
+                            <button onclick="changePeriod(15)" id="p2" class="period-btn flex-1 py-3 rounded-2xl text-xs font-bold bg-slate-100 text-slate-500">15일</button>
+                            <button onclick="changePeriod(30)" id="p3" class="period-btn flex-1 py-3 rounded-2xl text-xs font-bold bg-slate-100 text-slate-500">1개월</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="glass-card p-6 flex flex-col justify-center items-center text-center">
+                <div id="lastUpdate" class="text-xl font-mono text-slate-800 font-bold">--:--:--</div>
+                <div class="text-[10px] text-slate-400 mt-1 uppercase">Last TLE Sync</div>
+                <button onclick="updateData()" id="updateBtn" class="mt-4 bg-indigo-600 text-white py-3 px-6 rounded-2xl w-full font-bold transition-all hover:bg-indigo-500 flex items-center justify-center">
+                    <i class="fas fa-satellite-dish mr-2" id="refreshIcon"></i> 업데이트
+                </button>
+            </div>
+        </div>
+
+        <div id="loadingArea" class="hidden flex flex-col items-center justify-center py-24 glass-card mb-10">
+            <div class="loading-spinner mb-6"></div>
+            <p class="text-indigo-600 text-sm font-bold animate-pulse">데이터 계산 중...</p>
+        </div>
+
+        <div id="contentArea" class="space-y-8"></div>
+    </div>
+
+    <script>
+        const DEFAULT_NAME = "마산 삼계초등학교";
+        const DEFAULT_LAT = 35.2341;
+        const DEFAULT_LNG = 128.5085;
+        
+        let currentStation = 'ALL';
+        let currentPeriod = 7;
+        let allData = { ISS: [], CSS: [] };
+        let activeScenes = [];
+        let savedLocations = [];
+        let editingLocId = null;
+
+        let realtimeMap, issMarker, cssMarker, observerMarker;
+        let issOrbitLayer, cssOrbitLayer, issFootprint, cssFootprint;
+        let globalTles = { ISS: null, CSS: null };
+        let trackingInterval = null; 
+        let globalRenderer, isAnimating = false;
+
+        window.onload = () => {
+            loadLocations();
+            initMap();
+            startGlobalAnimation();
+        };
+
+        async function startApp() {
+            const overlay = document.getElementById('startOverlay');
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try { await DeviceOrientationEvent.requestPermission(); } catch (err) {}
+            }
+            if (overlay) overlay.style.opacity = '0';
+            setTimeout(() => { if (overlay) overlay.style.display = 'none'; fetchCurrentLocation(true); }, 400);
+        }
+
+        function closeOverlayOnly() {
+            const overlay = document.getElementById('startOverlay');
+            if (overlay) overlay.style.display = 'none';
+            fetchCurrentLocation(true);
+        }
+
+        function getGlobalRenderer() {
+            if (!globalRenderer) {
+                globalRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                globalRenderer.setPixelRatio(window.devicePixelRatio);
+            }
+            return globalRenderer;
+        }
+
+        function initMap() {
+            realtimeMap = L.map('realtimeMap', { attributionControl: false, maxBounds: [[-90, -180], [90, 180]], maxBoundsViscosity: 0.8, zoomSnap: 1 }); 
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 18, minZoom: 1, noWrap: true }).addTo(realtimeMap);
+            realtimeMap.setView([DEFAULT_LAT, DEFAULT_LNG], window.innerWidth < 768 ? 1 : 2);
+
+            issOrbitLayer = L.layerGroup().addTo(realtimeMap);
+            cssOrbitLayer = L.layerGroup().addTo(realtimeMap);
+
+            issFootprint = L.circle([0, 0], { radius: 0, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 1, dashArray: '4', interactive: false }).addTo(realtimeMap);
+            cssFootprint = L.circle([0, 0], { radius: 0, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.1, weight: 1, dashArray: '4', interactive: false }).addTo(realtimeMap);
+
+            const issIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="flex items-center justify-center w-6 h-6 bg-blue-500 rounded-full border-2 border-white shadow-md text-white text-[10px]"><i class="fas fa-globe"></i></div>', iconSize: [24, 24] });
+            const cssIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="flex items-center justify-center w-6 h-6 bg-red-500 rounded-full border-2 border-white shadow-md text-white text-[10px]"><i class="fas fa-rocket"></i></div>', iconSize: [24, 24] });
+            const obsIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>', iconSize: [16, 16] });
+
+            issMarker = L.marker([0, 0], {icon: issIcon}).addTo(realtimeMap);
+            cssMarker = L.marker([0, 0], {icon: cssIcon}).addTo(realtimeMap);
+            observerMarker = L.marker([DEFAULT_LAT, DEFAULT_LNG], {icon: obsIcon}).addTo(realtimeMap);
+        }
+
+        function getSatLatLng(tle) {
+            if (!tle) return null;
+            const satrec = satellite.twoline2satrec(tle[0], tle[1]), now = new Date();
+            const pv = satellite.propagate(satrec, now);
+            if (!pv.position) return null;
+            const gmst = satellite.gstime(now), gd = satellite.eciToGeodetic(pv.position, gmst);
+            return { lat: satellite.degreesLat(gd.latitude), lng: satellite.degreesLong(gd.longitude), alt: gd.height };
+        }
+
+        function getFootprintRadius(altKm) {
+            const R = 6371;
+            const angle = Math.acos(R / (R + altKm));
+            return R * angle * 1000;
+        }
+
+        function drawOrbitLines(layerGroup, tle, color) {
+            if (!tle) return;
+            layerGroup.clearLayers();
+            const satrec = satellite.twoline2satrec(tle[0], tle[1]);
+            const now = new Date();
+            let currentPath = [];
+            let lastLng = null;
+
+            for (let i = -10; i <= 90; i++) {
+                const date = new Date(now.getTime() + i * 60000);
+                const pv = satellite.propagate(satrec, date);
+                if (!pv.position) continue;
+                const gmst = satellite.gstime(date), gd = satellite.eciToGeodetic(pv.position, gmst);
+                const lat = satellite.degreesLat(gd.latitude), lng = satellite.degreesLong(gd.longitude);
+
+                if (lastLng !== null && Math.abs(lng - lastLng) > 150) {
+                    L.polyline(currentPath, { color, weight: 2, dashArray: '5, 8', opacity: 0.6 }).addTo(layerGroup);
+                    currentPath = [];
+                }
+                currentPath.push([lat, lng]);
+                lastLng = lng;
+            }
+            if (currentPath.length > 0) L.polyline(currentPath, { color, weight: 2, dashArray: '5, 8', opacity: 0.6 }).addTo(layerGroup);
+        }
+
+        function updateRealTimeTracking() {
+            if (globalTles.ISS) {
+                const pos = getSatLatLng(globalTles.ISS);
+                if (pos) {
+                    issMarker.setLatLng([pos.lat, pos.lng]);
+                    issFootprint.setLatLng([pos.lat, pos.lng]).setRadius(getFootprintRadius(pos.alt));
+                    drawOrbitLines(issOrbitLayer, globalTles.ISS, '#3b82f6');
+                    const locText = document.getElementById('issCurrentLoc');
+                    if (locText) locText.innerText = `ISS: ${pos.lat.toFixed(2)}°, ${pos.lng.toFixed(2)}° (${pos.alt.toFixed(0)}km)`;
+                }
+            }
+            if (globalTles.CSS) {
+                const pos = getSatLatLng(globalTles.CSS);
+                if (pos) {
+                    cssMarker.setLatLng([pos.lat, pos.lng]);
+                    cssFootprint.setLatLng([pos.lat, pos.lng]).setRadius(getFootprintRadius(pos.alt));
+                    drawOrbitLines(cssOrbitLayer, globalTles.CSS, '#ef4444');
+                    const locText = document.getElementById('cssCurrentLoc');
+                    if (locText) locText.innerText = `CSS: ${pos.lat.toFixed(2)}°, ${pos.lng.toFixed(2)}° (${pos.alt.toFixed(0)}km)`;
+                }
+            }
+        }
+
+        function fetchCurrentLocation(isAuto = false) {
+            const fb = () => { 
+                const la = document.getElementById('locLat'), lo = document.getElementById('locLng'), na = document.getElementById('locName');
+                if (isAuto) { 
+                    if (la) la.value = DEFAULT_LAT; if (lo) lo.value = DEFAULT_LNG; if (na) na.value = DEFAULT_NAME; 
+                    updateData(); 
+                } 
+            };
+            if (!navigator.geolocation) { fb(); return; }
+            navigator.geolocation.getCurrentPosition((p) => {
+                const la = document.getElementById('locLat'), lo = document.getElementById('locLng'), na = document.getElementById('locName');
+                if (la) la.value = p.coords.latitude.toFixed(4); if (lo) lo.value = p.coords.longitude.toFixed(4);
+                if (isAuto && na) na.value = "현재 내 위치";
+                updateData();
+            }, fb, { timeout: 8000 });
+        }
+
+        function toggleLocationSettings() {
+            const p = document.getElementById('locationSettingsPanel');
+            if (p) p.classList.toggle('hidden');
+        }
+
+        function applyInputLocation() { updateData(); toggleLocationSettings(); showToast("위치가 반영되었습니다."); }
+        function setNewLocation() { 
+            const na = document.getElementById('locName'), la = document.getElementById('locLat'), lo = document.getElementById('locLng');
+            if (na) na.value = getNextAutoName(); if (la) la.value = ''; if (lo) lo.value = ''; 
+        }
+        function getNextAutoName() {
+            const names = savedLocations.map(l => l.name);
+            let n = 1; while (names.includes(`새 위치 ${n}`)) n++;
+            return `새 위치 ${n}`;
+        }
+
+        function saveLocation() {
+            const na = document.getElementById('locName'), la = document.getElementById('locLat'), lo = document.getElementById('locLng');
+            if (!na || !la || !lo) return;
+            const n = na.value.trim(), lLat = la.value, lLng = lo.value;
+            if (!n || !lLat || !lLng) return;
+            savedLocations.push({ id: Date.now().toString(), name: n, lat: parseFloat(lLat), lng: parseFloat(lLng) });
+            localStorage.setItem('spaceTrackerLocations', JSON.stringify(savedLocations)); renderSavedLocations(); setNewLocation(); showToast("저장되었습니다.");
+        }
+
+        function renderSavedLocations() {
+            const c = document.getElementById('savedLocationsContainer');
+            if (!c) return;
+            c.innerHTML = savedLocations.slice(-3).map(l => `
+                <div class="saved-loc-card" onclick="document.getElementById('locLat').value='${l.lat}';document.getElementById('locLng').value='${l.lng}';document.getElementById('locName').value='${l.name}';">
+                    <div class="text-sm font-bold truncate">${l.name}</div>
+                    <div class="text-[10px] text-slate-400">${l.lat}, ${l.lng}</div>
+                </div>
+            `).join('');
+        }
+
+        function loadLocations() {
+            const s = localStorage.getItem('spaceTrackerLocations');
+            if (s) savedLocations = JSON.parse(s);
+            renderSavedLocations();
+        }
+
+        async function fetchTLEs() {
+            let iss = null, css = null;
+            try {
+                const r = await fetch("https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle");
+                if (r.ok) {
+                    const t = await r.text(), ls = t.split('\n').map(x => x.trim());
+                    for(let k = 0; k < ls.length; k++) {
+                        if(ls[k].includes("ISS (ZARYA)")) iss = [ls[k+1], ls[k+2]];
+                        if(ls[k].includes("TIANGONG")) css = [ls[k+1], ls[k+2]];
+                    }
+                }
+            } catch (e) {}
+            if (!iss) iss = ["1 25544U 98067A   24131.54714120  .00016717  00000-0  30177-3 0  9990", "2 25544  51.6416  20.8954 0004817  70.7416  30.4093 15.49845345454315"];
+            if (!css) css = ["1 48274U 21035A   24131.53692882  .00010000  00000-0  10000-3 0  9990", "2 48274  41.4723 151.7412 0001432  85.7412 274.3521 15.58912345172635"];
+            return { iss, css };
+        }
+
+        function calculatePasses(tle, lat, lng, days, type) {
+            const sr = satellite.twoline2satrec(tle[0], tle[1]), ps = [], now = new Date(), end = now.getTime() + days * 86400000;
+            let t = now.getTime();
+            while (t <= end) {
+                const d = new Date(t), pv = satellite.propagate(sr, d);
+                if (!pv.position) { t += 60000; continue; }
+                const gmst = satellite.gstime(d), ecf = satellite.eciToEcf(pv.position, gmst), obs = { longitude: lng*Math.PI/180, latitude: lat*Math.PI/180, height: 0.1 };
+                const la = satellite.ecfToLookAngles(obs, ecf), el = la.elevation * 180 / Math.PI;
+                if (el >= 0) {
+                    let s = null, m = null, e = null, maxEl = -90, vis = 0;
+                    while (t <= end) {
+                        const fd = new Date(t), fpv = satellite.propagate(sr, fd); if (!fpv.position) break;
+                        const fgs = satellite.gstime(fd), fe = satellite.eciToEcf(fpv.position, fgs), fl = satellite.ecfToLookAngles(obs, fe);
+                        const fel = fl.elevation * 180 / Math.PI, faz = fl.azimuth * 180 / Math.PI;
+                        if (fel < 0) break;
+                        if (fel >= 10) {
+                            if (!s) s = { time: fd, az: faz };
+                            if (fel > maxEl) { maxEl = fel; m = { time: fd, az: faz, el: fel }; }
+                            e = { time: fd, az: faz };
+                            const sp = SunCalc.getPosition(fd, lat, lng), pgd = satellite.eciToGeodetic(fpv.position, fgs), sa = SunCalc.getPosition(fd, pgd.latitude*180/Math.PI, pgd.longitude*180/Math.PI);
+                            if (sp.altitude < -0.05 && sa.altitude > -Math.acos(6371/(6371+pgd.height))) vis++;
+                        }
+                        t += 10000;
+                    }
+                    if (s && e && m && vis > 0 && maxEl >= 10) ps.push(formatPass({ start: s, max: m, end: e }, type));
+                    t += 2400000;
+                } else t += 60000;
+            }
+            return ps;
+        }
+
+        function getAzimuthStr(az) {
+            const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+            return dirs[Math.floor((az * 180 / Math.PI / 22.5) + 0.5) % 16];
+        }
+
+        function formatPass(p, type) {
+            const d = p.max.time, week = ['일', '월', '화', '수', '목', '금', '토'];
+            const ft = (t) => {
+                const h = t.getHours().toString().padStart(2, '0'), m = t.getMinutes().toString().padStart(2, '0'), s = t.getSeconds().toString().padStart(2, '0');
+                return { short: `${h} : ${m}`, long: `${h} : ${m} : ${s}` };
+            };
+            const ds = Math.floor((p.end.time - p.start.time) / 1000);
+            return { type, date: `${d.getMonth()+1}월 ${d.getDate()}일 (${week[d.getDay()]})`, startTime: ft(p.start.time).long, endTime: ft(p.end.time).long, peakTime: ft(p.max.time).long, alt: p.max.el.toFixed(1), dir: `${getAzimuthStr(p.start.az)} -> ${getAzimuthStr(p.end.az)}`, duration: `${Math.floor(ds/60)}분 ${ds%60}초`, timestamp: p.start.time.getTime(), mag: (type === 'ISS' ? -3.5 : -1.0 + (90 - p.max.el)*0.02).toFixed(1) };
+        }
+
+        async function updateData() {
+            const b = document.getElementById('updateBtn'), i = document.getElementById('refreshIcon'), l = document.getElementById('loadingArea'), c = document.getElementById('contentArea');
+            const laInput = document.getElementById('locLat'), loInput = document.getElementById('locLng');
+            const la = laInput ? parseFloat(laInput.value) || DEFAULT_LAT : DEFAULT_LAT;
+            const ln = loInput ? parseFloat(loInput.value) || DEFAULT_LNG : DEFAULT_LNG;
+            
+            const headDesc = document.getElementById('headerLocDesc');
+            if (headDesc) headDesc.innerText = `${la}, ${ln}`;
+            if (observerMarker) observerMarker.setLatLng([la, ln]);
+            
+            if (b) b.disabled = true; if (i) i.classList.add('fa-spin'); 
+            if (l) l.classList.remove('hidden'); if (c) c.innerHTML = ""; 
+            activeScenes = [];
+
+            try {
+                const tles = await fetchTLEs();
+                globalTles.ISS = tles.iss; globalTles.CSS = tles.css;
+                if (trackingInterval) clearInterval(trackingInterval);
+                trackingInterval = setInterval(updateRealTimeTracking, 3000);
+                updateRealTimeTracking();
+
+                allData.ISS = calculatePasses(tles.iss, la, ln, currentPeriod, 'ISS');
+                allData.CSS = calculatePasses(tles.css, la, ln, currentPeriod, 'CSS');
+                renderPasses();
+                const lastUpd = document.getElementById('lastUpdate');
+                if (lastUpd) lastUpd.innerText = new Date().toLocaleTimeString();
+            } catch (e) { console.error(e); } finally { 
+                if (b) b.disabled = false; if (i) i.classList.remove('fa-spin'); 
+                if (l) l.classList.add('hidden'); 
+            }
+        }
+
+        function renderPasses() {
+            const c = document.getElementById('contentArea');
+            if (!c) return;
+            let ps = currentStation === 'ALL' ? [...allData.ISS, ...allData.CSS] : allData[currentStation];
+            if (ps.length === 0) { c.innerHTML = "<div class='glass-card p-12 text-center'>관측 가능한 일정이 없습니다.</div>"; return; }
+            ps.sort((a, b) => a.timestamp - b.timestamp);
+            c.innerHTML = ps.map((p, idx) => `
+                <div class="glass-card pass-card mb-8">
+                    <div class="flex flex-col lg:flex-row">
+                        <div class="p-8 lg:w-3/5 border-b lg:border-b-0 lg:border-r">
+                            <div class="flex justify-between items-start mb-6">
+                                <div>
+                                    <span class="px-2 py-0.5 rounded ${p.type === 'ISS' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'} text-[10px] font-black uppercase mr-2">${p.type}</span>
+                                    <span class="text-indigo-600 font-bold text-xs uppercase">${p.date}</span>
+                                    <h4 class="text-slate-800 text-3xl md:text-5xl font-black mt-2 tracking-tight">${p.startTime} <span class="block text-xl text-slate-400 font-medium mt-2">~ <span class="text-yellow-500">${p.endTime}</span> <span class="text-base text-slate-300">(${p.duration})</span></span></h4>
+                                </div>
+                                <div class="text-right"><span class="text-2xl font-black text-indigo-500">${p.mag <= 0 ? p.mag : '+' + p.mag}</span><div class="text-[10px] text-slate-400 font-bold uppercase">Mag</div></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2">MAX ALT</span><span class="text-2xl text-slate-800 font-black">${p.alt}°</span></div>
+                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2">DIRECTION</span><span class="text-sm text-slate-800 font-bold">${p.dir}</span></div>
+                            </div>
+                        </div>
+                        <div class="lg:w-2/5 relative bg-slate-50 overflow-hidden"><div id="chart-3d-${idx}" class="three-container"></div></div>
+                    </div>
+                </div>`).join('');
+            setTimeout(() => ps.forEach((p, i) => {
+                const ds = p.dir.split('->').map(x => x.trim());
+                init3DScene(`chart-3d-${i}`, ds[0], ds[1], parseFloat(p.alt), p.startTime, p.endTime, p.peakTime);
+            }), 100);
+        }
+
+        function createTextSprite(t, c, f) {
+            const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+            canvas.width = 300; canvas.height = 120; ctx.fillStyle = c; ctx.font = `bold ${f}px Pretendard`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, 150, 60);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) })); sprite.scale.set(4.5, 1.8, 1); return sprite;
+        }
+
+        function init3DScene(id, sD, eD, maxA, startTime, endTime, peakTime) {
+            const container = document.getElementById(id); if (!container) return;
+            const canvas2d = document.createElement('canvas'); canvas2d.style.width = canvas2d.style.height = '100%'; canvas2d.style.position = 'absolute'; canvas2d.style.top = canvas2d.style.left = '0'; container.appendChild(canvas2d);
+            const ctx = canvas2d.getContext('2d'), r = getGlobalRenderer(), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 1000);
+            cam.position.set(0, 10, 15); cam.lookAt(0, 0, 0);
+            const wg = new THREE.Group(); scene.add(wg); wg.add(new THREE.GridHelper(16, 8, 0x94a3b8, 0xcbd5e1));
+            const addL = (txt, pos) => { const l = createTextSprite(txt, 'rgba(71, 85, 105, 0.6)', 40); l.position.copy(pos); wg.add(l); };
+            addL('N', new THREE.Vector3(0,0,-9)); addL('S', new THREE.Vector3(0,0,9)); addL('E', new THREE.Vector3(9,0,0)); addL('W', new THREE.Vector3(-9,0,0));
+            
+            const centerAlt = createTextSprite(`${maxA}°`, '#1e293b', 72); centerAlt.position.set(0, 0.5, 0); wg.add(centerAlt);
+
+            const mapAz = { 'N':0, 'NNE':22.5, 'NE':45, 'ENE':67.5, 'E':90, 'ESE':112.5, 'SE':135, 'SSE':157.5, 'S':180, 'SSW':202.5, 'SW':225, 'WSW':247.5, 'W':270, 'WNW':292.5, 'NW':315, 'NNW':337.5 };
+            const sa = (mapAz[sD.toUpperCase()] - 90)*(Math.PI/180), ea = (mapAz[eD.toUpperCase()] - 90)*(Math.PI/180), pa = (sa+ea)/2, R = 8;
+            const gp = (a, alt) => new THREE.Vector3(R*Math.cos(alt*Math.PI/180)*Math.cos(a), R*Math.sin(alt*Math.PI/180), R*Math.cos(alt*Math.PI/180)*Math.sin(a));
+            
+            const p1 = gp(sa, 10), pPeak = gp(pa, maxA), p3 = gp(ea, 10);
+            const curve = new THREE.CatmullRomCurve3([p1, pPeak, p3]);
+            const curvePoints = curve.getPoints(60);
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curvePoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2, linewidth: 2 }));
+            line.computeLineDistances(); wg.add(line);
+
+            // 궤도 정점(노란색) 점 추가
+            const pb = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({ color: 0xf59e0b })); pb.position.copy(pPeak); wg.add(pb);
+            const peakLabel = createTextSprite(peakTime, '#f59e0b', 34); peakLabel.position.set(pPeak.x, pPeak.y + 1, pPeak.z); wg.add(peakLabel);
+
+            // 시작점 파란색 작은 점 추가
+            const p1Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x3b82f6 })); p1Dot.position.copy(p1); wg.add(p1Dot);
+            const startLabel = createTextSprite(startTime, '#3b82f6', 28); startLabel.position.set(p1.x, p1.y - 1, p1.z); wg.add(startLabel);
+
+            // 끝점 회색 작은 점 추가
+            const p3Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x64748b })); p3Dot.position.copy(p3); wg.add(p3Dot);
+            const endLabel = createTextSprite(endTime, '#64748b', 28); endLabel.position.set(p3.x, p3.y - 1, p3.z); wg.add(endLabel);
+
+            // 진행 방향 화살표
+            [15, 45].forEach(idx => {
+                const pos = curvePoints[idx];
+                const nextPos = curvePoints[idx+1];
+                const dir = new THREE.Vector3().subVectors(nextPos, pos).normalize();
+                const arrow = new THREE.ArrowHelper(dir, pos, 1.2, 0x4f46e5, 0.4, 0.3);
+                wg.add(arrow);
+            });
+
+            // 상호작용 데이터 객체
+            const s = { container, canvas2d, ctx, scene, camera: cam, worldGroup: wg, targetRotY: 0, prevX: 0, isDragging: false };
+            
+            // 드래그/스와이프 이벤트 리스너
+            const onDown = (x) => { s.isDragging = true; s.prevX = x; };
+            const onMove = (x) => { if (s.isDragging) { s.targetRotY += (x - s.prevX) * 0.015; s.prevX = x; } };
+            const onUp = () => { s.isDragging = false; };
+
+            container.addEventListener('mousedown', (e) => onDown(e.clientX));
+            window.addEventListener('mousemove', (e) => onMove(e.clientX));
+            window.addEventListener('mouseup', onUp);
+            container.addEventListener('touchstart', (e) => onDown(e.touches[0].clientX));
+            window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX));
+            window.addEventListener('touchend', onUp);
+
+            activeScenes.push(s);
+        }
+
+        function startGlobalAnimation() {
+            if (isAnimating) return; isAnimating = true;
+            const animate = () => {
+                requestAnimationFrame(animate); const r = getGlobalRenderer(), dpr = window.devicePixelRatio;
+                activeScenes.forEach(s => {
+                    const rect = s.container.getBoundingClientRect();
+                    if (rect.top < window.innerHeight && rect.bottom > 0) {
+                        s.worldGroup.rotation.y += (s.targetRotY - s.worldGroup.rotation.y) * 0.1;
+                        const w = s.container.clientWidth, h = s.container.clientHeight;
+                        if (w > 0 && h > 0) {
+                            if (s.canvas2d.width !== w*dpr) { s.canvas2d.width = w*dpr; s.canvas2d.height = h*dpr; s.camera.aspect = w/h; s.camera.updateProjectionMatrix(); }
+                            if (r.getSize(new THREE.Vector2()).x !== w) r.setSize(w, h, false);
+                            r.render(s.scene, s.camera); s.ctx.clearRect(0,0,w*dpr,h*dpr); s.ctx.drawImage(r.domElement, 0,0,w*dpr,h*dpr);
+                        }
+                    }
+                });
+            }; animate();
+        }
+
+        function showToast(m) { const t = document.getElementById('toast'); if (t) { t.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); } }
+        function scrollToCard(d) {
+            const cs = Array.from(document.querySelectorAll('.pass-card')), vt = window.scrollY + 120;
+            const tc = d === 'next' ? cs.find(c => c.offsetTop > vt) : cs.slice().reverse().find(c => c.offsetTop < vt - 100);
+            if (tc) window.scrollTo({ top: tc.offsetTop - 40, behavior: 'smooth' });
+        }
+        function changeStation(s) { currentStation = s; document.querySelectorAll('.station-btn').forEach(b => b.classList.toggle('active', b.id === `btn${s}`)); renderPasses(); }
+        function changePeriod(p) { currentPeriod = p; document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.id === (p===7?'p1':p===15?'p2':'p3'))); updateData(); }
+    </script>
+</body>
+</html>
