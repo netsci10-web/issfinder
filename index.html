@@ -105,7 +105,7 @@
             <div class="glass-card p-6 flex flex-col justify-center items-center text-center">
                 <div id="lastUpdate" class="text-xl font-mono text-slate-800 font-bold">--:--:--</div>
                 <div class="text-[10px] text-slate-400 mt-1 uppercase">Last TLE Sync</div>
-                <button onclick="updateData()" id="updateBtn" class="mt-4 bg-indigo-600 text-white py-3 px-6 rounded-2xl w-full font-bold transition-all hover:bg-indigo-500 flex items-center justify-center">
+                <button onclick="updateData()" id="updateBtn" class="mt-4 bg-indigo-600 text-white py-3 px-6 rounded-2xl w-full font-bold transition-all hover:bg-indigo-500 active:scale-95 flex items-center justify-center">
                     <i class="fas fa-satellite-dish mr-2" id="refreshIcon"></i> 업데이트
                 </button>
             </div>
@@ -113,7 +113,7 @@
 
         <div id="loadingArea" class="hidden flex flex-col items-center justify-center py-24 glass-card mb-10">
             <div class="loading-spinner mb-6"></div>
-            <p class="text-indigo-600 text-sm font-bold animate-pulse">데이터 계산 중...</p>
+            <p class="text-indigo-600 text-sm font-bold animate-pulse">데이터 및 날씨 정보를 수집 중입니다...</p>
         </div>
 
         <div id="contentArea" class="space-y-8"></div>
@@ -127,6 +127,7 @@
         let currentStation = 'ALL';
         let currentPeriod = 7;
         let allData = { ISS: [], CSS: [] };
+        let weatherData = []; 
         let activeScenes = [];
         let savedLocations = [];
         let editingLocId = null;
@@ -249,13 +250,42 @@
             }
         }
 
+        async function fetchWeatherData(lat, lng) {
+            try {
+                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,cloudcover&timezone=auto`);
+                const data = await res.json();
+                if (data && data.hourly) {
+                    return data.hourly.time.map((time, idx) => ({
+                        time: new Date(time).getTime(),
+                        temp: data.hourly.temperature_2m[idx],
+                        clouds: data.hourly.cloudcover[idx]
+                    }));
+                }
+            } catch (e) { console.error("날씨 정보 획득 실패", e); }
+            return [];
+        }
+
+        function getClosestWeather(timestamp) {
+            if (!weatherData.length) return null;
+            return weatherData.reduce((prev, curr) => 
+                Math.abs(curr.time - timestamp) < Math.abs(prev.time - timestamp) ? curr : prev
+            );
+        }
+
+        function getWeatherUI(timestamp) {
+            const w = getClosestWeather(timestamp);
+            if (!w) return `<span class="text-gray-400">정보 없음</span>`;
+            let icon = 'fa-sun'; let color = 'text-yellow-500'; let label = '맑음';
+            if (w.clouds > 70) { icon = 'fa-cloud'; color = 'text-gray-500'; label = '흐림'; }
+            else if (w.clouds > 30) { icon = 'fa-cloud-sun'; color = 'text-blue-400'; label = '구름 많음'; }
+            else if (w.clouds > 10) { icon = 'fa-cloud-sun'; color = 'text-yellow-400'; label = '구름 조금'; }
+            return `<div class="flex items-center gap-2"><i class="fas ${icon} ${color} text-xl"></i><div><div class="text-xs font-black text-slate-800">${label} (${w.clouds}%)</div><div class="text-[10px] text-slate-400">${w.temp}°C</div></div></div>`;
+        }
+
         function fetchCurrentLocation(isAuto = false) {
             const fb = () => { 
                 const la = document.getElementById('locLat'), lo = document.getElementById('locLng'), na = document.getElementById('locName');
-                if (isAuto) { 
-                    if (la) la.value = DEFAULT_LAT; if (lo) lo.value = DEFAULT_LNG; if (na) na.value = DEFAULT_NAME; 
-                    updateData(); 
-                } 
+                if (isAuto) { if (la) la.value = DEFAULT_LAT; if (lo) lo.value = DEFAULT_LNG; if (na) na.value = DEFAULT_NAME; updateData(); } 
             };
             if (!navigator.geolocation) { fb(); return; }
             navigator.geolocation.getCurrentPosition((p) => {
@@ -316,10 +346,14 @@
                     const t = await r.text(), ls = t.split('\n').map(x => x.trim());
                     for(let k = 0; k < ls.length; k++) {
                         if(ls[k].includes("ISS (ZARYA)")) iss = [ls[k+1], ls[k+2]];
-                        if(ls[k].includes("TIANGONG")) css = [ls[k+1], ls[k+2]];
+                        // CSS/TIANGONG 이름을 더 폭넓게 검색
+                        if(ls[k].includes("TIANGONG") || ls[k].includes("CSS (TIANGONG)")) {
+                            if (!css) css = [ls[k+1], ls[k+2]];
+                        }
                     }
                 }
-            } catch (e) {}
+            } catch (e) { console.error("TLE Fetch Error:", e); }
+            // 기본값 백업 (네트워크 오류 대비)
             if (!iss) iss = ["1 25544U 98067A   24131.54714120  .00016717  00000-0  30177-3 0  9990", "2 25544  51.6416  20.8954 0004817  70.7416  30.4093 15.49845345454315"];
             if (!css) css = ["1 48274U 21035A   24131.53692882  .00010000  00000-0  10000-3 0  9990", "2 48274  41.4723 151.7412 0001432  85.7412 274.3521 15.58912345172635"];
             return { iss, css };
@@ -358,7 +392,7 @@
 
         function getAzimuthStr(az) {
             const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-            return dirs[Math.floor((az * 180 / Math.PI / 22.5) + 0.5) % 16];
+            return dirs[Math.floor((az / 22.5) + 0.5) % 16];
         }
 
         function formatPass(p, type) {
@@ -377,8 +411,7 @@
             const la = laInput ? parseFloat(laInput.value) || DEFAULT_LAT : DEFAULT_LAT;
             const ln = loInput ? parseFloat(loInput.value) || DEFAULT_LNG : DEFAULT_LNG;
             
-            const headDesc = document.getElementById('headerLocDesc');
-            if (headDesc) headDesc.innerText = `${la}, ${ln}`;
+            if (document.getElementById('headerLocDesc')) document.getElementById('headerLocDesc').innerText = `${la}, ${ln}`;
             if (observerMarker) observerMarker.setLatLng([la, ln]);
             
             if (b) b.disabled = true; if (i) i.classList.add('fa-spin'); 
@@ -386,8 +419,10 @@
             activeScenes = [];
 
             try {
-                const tles = await fetchTLEs();
-                globalTles.ISS = tles.iss; globalTles.CSS = tles.css;
+                const [tles, weather] = await Promise.all([fetchTLEs(), fetchWeatherData(la, ln)]);
+                globalTles.ISS = tles.iss; globalTles.CSS = tles.css; // 대문자 통일
+                weatherData = weather;
+
                 if (trackingInterval) clearInterval(trackingInterval);
                 trackingInterval = setInterval(updateRealTimeTracking, 3000);
                 updateRealTimeTracking();
@@ -395,8 +430,7 @@
                 allData.ISS = calculatePasses(tles.iss, la, ln, currentPeriod, 'ISS');
                 allData.CSS = calculatePasses(tles.css, la, ln, currentPeriod, 'CSS');
                 renderPasses();
-                const lastUpd = document.getElementById('lastUpdate');
-                if (lastUpd) lastUpd.innerText = new Date().toLocaleTimeString();
+                if (document.getElementById('lastUpdate')) document.getElementById('lastUpdate').innerText = new Date().toLocaleTimeString();
             } catch (e) { console.error(e); } finally { 
                 if (b) b.disabled = false; if (i) i.classList.remove('fa-spin'); 
                 if (l) l.classList.add('hidden'); 
@@ -419,10 +453,14 @@
                                     <span class="text-indigo-600 font-bold text-xs uppercase">${p.date}</span>
                                     <h4 class="text-slate-800 text-3xl md:text-5xl font-black mt-2 tracking-tight">${p.startTime} <span class="block text-xl text-slate-400 font-medium mt-2">~ <span class="text-yellow-500">${p.endTime}</span> <span class="text-base text-slate-300">(${p.duration})</span></span></h4>
                                 </div>
-                                <div class="text-right"><span class="text-2xl font-black text-indigo-500">${p.mag <= 0 ? p.mag : '+' + p.mag}</span><div class="text-[10px] text-slate-400 font-bold uppercase">Mag</div></div>
+                                <div class="text-right">
+                                    <div class="mb-2">${getWeatherUI(p.timestamp)}</div>
+                                    <span class="text-2xl font-black text-indigo-500">${p.mag <= 0 ? p.mag : '+' + p.mag}</span>
+                                    <div class="text-[10px] text-slate-400 font-bold uppercase">Mag</div>
+                                </div>
                             </div>
                             <div class="grid grid-cols-2 gap-4">
-                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2">MAX ALT</span><span class="text-2xl text-slate-800 font-black">${p.alt}°</span></div>
+                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2">MAX ALT</span><span class="text-2xl text-slate-800 font-black">${p.alt}°</span><div class="text-[10px] text-orange-500 mt-2 font-bold">정점: ${p.peakTime}</div></div>
                                 <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2">DIRECTION</span><span class="text-sm text-slate-800 font-bold">${p.dir}</span></div>
                             </div>
                         </div>
@@ -449,7 +487,6 @@
             const wg = new THREE.Group(); scene.add(wg); wg.add(new THREE.GridHelper(16, 8, 0x94a3b8, 0xcbd5e1));
             const addL = (txt, pos) => { const l = createTextSprite(txt, 'rgba(71, 85, 105, 0.6)', 40); l.position.copy(pos); wg.add(l); };
             addL('N', new THREE.Vector3(0,0,-9)); addL('S', new THREE.Vector3(0,0,9)); addL('E', new THREE.Vector3(9,0,0)); addL('W', new THREE.Vector3(-9,0,0));
-            
             const centerAlt = createTextSprite(`${maxA}°`, '#1e293b', 72); centerAlt.position.set(0, 0.5, 0); wg.add(centerAlt);
 
             const mapAz = { 'N':0, 'NNE':22.5, 'NE':45, 'ENE':67.5, 'E':90, 'ESE':112.5, 'SE':135, 'SSE':157.5, 'S':180, 'SSW':202.5, 'SW':225, 'WSW':247.5, 'W':270, 'WNW':292.5, 'NW':315, 'NNW':337.5 };
@@ -459,45 +496,34 @@
             const p1 = gp(sa, 10), pPeak = gp(pa, maxA), p3 = gp(ea, 10);
             const curve = new THREE.CatmullRomCurve3([p1, pPeak, p3]);
             const curvePoints = curve.getPoints(60);
-            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curvePoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2, linewidth: 2 }));
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curvePoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2 }));
             line.computeLineDistances(); wg.add(line);
 
-            // 궤도 정점(노란색) 점 추가
             const pb = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({ color: 0xf59e0b })); pb.position.copy(pPeak); wg.add(pb);
             const peakLabel = createTextSprite(peakTime, '#f59e0b', 34); peakLabel.position.set(pPeak.x, pPeak.y + 1, pPeak.z); wg.add(peakLabel);
 
-            // 시작점 파란색 작은 점 추가
             const p1Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x3b82f6 })); p1Dot.position.copy(p1); wg.add(p1Dot);
             const startLabel = createTextSprite(startTime, '#3b82f6', 28); startLabel.position.set(p1.x, p1.y - 1, p1.z); wg.add(startLabel);
 
-            // 끝점 회색 작은 점 추가
             const p3Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x64748b })); p3Dot.position.copy(p3); wg.add(p3Dot);
             const endLabel = createTextSprite(endTime, '#64748b', 28); endLabel.position.set(p3.x, p3.y - 1, p3.z); wg.add(endLabel);
 
-            // 진행 방향 화살표
             [15, 45].forEach(idx => {
-                const pos = curvePoints[idx];
-                const nextPos = curvePoints[idx+1];
+                const pos = curvePoints[idx]; const nextPos = curvePoints[idx+1];
                 const dir = new THREE.Vector3().subVectors(nextPos, pos).normalize();
-                const arrow = new THREE.ArrowHelper(dir, pos, 1.2, 0x4f46e5, 0.4, 0.3);
-                wg.add(arrow);
+                const arrow = new THREE.ArrowHelper(dir, pos, 1.2, 0x4f46e5, 0.4, 0.3); wg.add(arrow);
             });
 
-            // 상호작용 데이터 객체
             const s = { container, canvas2d, ctx, scene, camera: cam, worldGroup: wg, targetRotY: 0, prevX: 0, isDragging: false };
-            
-            // 드래그/스와이프 이벤트 리스너
             const onDown = (x) => { s.isDragging = true; s.prevX = x; };
             const onMove = (x) => { if (s.isDragging) { s.targetRotY += (x - s.prevX) * 0.015; s.prevX = x; } };
             const onUp = () => { s.isDragging = false; };
-
             container.addEventListener('mousedown', (e) => onDown(e.clientX));
             window.addEventListener('mousemove', (e) => onMove(e.clientX));
             window.addEventListener('mouseup', onUp);
             container.addEventListener('touchstart', (e) => onDown(e.touches[0].clientX));
             window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX));
             window.addEventListener('touchend', onUp);
-
             activeScenes.push(s);
         }
 
