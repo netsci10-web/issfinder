@@ -869,7 +869,14 @@
                 }
             });
 
-            passDetailMap.setView([p.obsLat, p.obsLng], 6);
+            // 관측자 위치와 위성 정점이 모두 잘 보이도록 자동 줌/이동 처리
+            if (peakPos) {
+                const bounds = L.latLngBounds([ [p.obsLat, p.obsLng], [peakPos.lat, peakPos.lng] ]);
+                // padding 옵션을 주어 핀이 화면 모서리에 딱 붙지 않도록 여유 공간을 둡니다.
+                passDetailMap.fitBounds(bounds, { padding: [100, 100], maxZoom: 7 });
+            } else {
+                passDetailMap.setView([p.obsLat, p.obsLng], 6);
+            }
         }
 
         // --- 물리 기반 정확한 3D 궤도 챠트 시각화 ---
