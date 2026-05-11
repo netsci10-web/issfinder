@@ -25,13 +25,13 @@
         #toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(30, 41, 59, 0.9); color: white; padding: 12px 24px; border-radius: 50px; font-weight: bold; font-size: 14px; opacity: 0; pointer-events: none; transition: all 0.3s ease; z-index: 9999; }
         #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         .loc-input { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; color: #1e293b; font-size: 14px; width: 100%; transition: border-color 0.2s; }
+        .loc-input:focus { outline: none; border-color: #4f46e5; }
         .saved-loc-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; transition: all 0.2s; padding: 12px; cursor: pointer; }
         .saved-loc-card:hover { border-color: #4f46e5; background: #f8fafc; }
     </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 pb-24">
 
-    <!-- 시작 안내 오버레이 -->
     <div id="startOverlay" class="fixed inset-0 z-[10000] flex items-center justify-center bg-white bg-opacity-90 backdrop-blur-md transition-opacity duration-500">
         <div class="glass-card p-8 text-center max-w-sm mx-4">
             <div class="w-20 h-20 mx-auto bg-indigo-500/10 rounded-full flex items-center justify-center mb-6 border border-indigo-500/20">
@@ -41,6 +41,21 @@
             <p class="text-sm text-slate-500 mb-8 leading-relaxed">우주정거장의 실시간 위치와<br/>폰 방향이 연동된 3D 궤도를 확인해 보세요.</p>
             <button onclick="startApp()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-all mb-3">시작하기</button>
             <button onclick="closeOverlayOnly()" class="text-xs text-slate-400 underline p-2">나침반 없이 시작</button>
+        </div>
+    </div>
+
+    <!-- 관측 상세 지도 모달 -->
+    <div id="passMapModal" class="fixed inset-0 z-[20000] hidden items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 transition-opacity duration-300 opacity-0">
+        <div class="bg-white w-full max-w-5xl h-[85vh] rounded-3xl flex flex-col overflow-hidden shadow-2xl relative transform transition-transform scale-95" id="passMapModalContent">
+            <div class="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50">
+                <h3 id="passMapTitle" class="font-black text-lg text-slate-800">
+                    <i class="fas fa-satellite text-indigo-500 mr-2"></i> 관측 궤도 상세 지도
+                </h3>
+                <button onclick="closePassMap()" class="text-slate-400 hover:text-red-500 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="passDetailMap" class="flex-1 w-full bg-slate-200"></div>
         </div>
     </div>
 
@@ -62,8 +77,12 @@
             </div>
         </header>
 
-        <!-- 위치 설정 패널 -->
         <div id="locationSettingsPanel" class="glass-card p-6 mb-6 hidden">
+            <div class="mb-4">
+                <span class="text-[10px] text-slate-400 font-black mb-2 block"><i class="fas fa-map-marked-alt mr-1"></i>지도에서 클릭하여 위치 선택</span>
+                <div id="locSelectionMap" class="w-full h-48 md:h-64 rounded-xl border border-slate-200 z-10 relative" style="background: #e5e7eb;"></div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-12 gap-3 mb-4">
                 <div class="md:col-span-3"><input type="text" id="locName" class="loc-input h-full" placeholder="위치 이름 (예: 우리집)"></div>
                 <div class="md:col-span-3"><input type="number" id="locLat" class="loc-input h-full" placeholder="위도" step="0.0001"></div>
@@ -72,18 +91,21 @@
                     <button onclick="applyInputLocation()" class="w-full h-full bg-indigo-600 text-white text-sm font-bold py-3 px-4 rounded-xl shadow-md transition-all hover:bg-indigo-500 active:scale-95">위치 반영</button>
                 </div>
             </div>
+            
             <div class="flex gap-2 mb-4 border-b border-slate-100 pb-4">
-                 <button onclick="fetchCurrentLocation(false)" class="flex-1 bg-blue-500/10 text-blue-600 text-xs font-black py-3 rounded-xl border border-blue-500/20 hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2">
-                    <i class="fas fa-location-arrow"></i> 현위치 찾기 (GPS)
+                 <button onclick="fetchCurrentLocation()" class="flex-1 bg-blue-500/10 text-blue-600 text-xs font-black py-3 rounded-xl border border-blue-500/20 hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2">
+                    <i class="fas fa-location-arrow"></i> 현위치 찾기
+                 </button>
+                 <button onclick="saveLocation()" id="btnSaveLoc" class="flex-1 bg-green-500/10 text-green-600 text-xs font-black py-3 rounded-xl border border-green-500/20 hover:bg-green-500/20 transition-all flex items-center justify-center gap-2">
+                    <i class="fas fa-save"></i> <span id="txtSaveLoc">저장</span>
                  </button>
                  <button onclick="setNewLocation()" class="flex-1 bg-slate-500/10 text-slate-600 text-xs font-black py-3 rounded-xl border border-slate-500/20 hover:bg-slate-500/20 transition-all flex items-center justify-center gap-2">
-                    <i class="fas fa-eraser"></i> 입력창 비우기
+                    <i class="fas fa-eraser"></i> 비우기
                  </button>
             </div>
             <div id="savedLocationsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
         </div>
 
-        <!-- 실시간 지도 -->
         <div class="glass-card p-6 mb-6">
             <div id="realtimeMap" class="w-full h-64 md:h-80 rounded-xl border border-slate-200" style="background: #e5e7eb;"></div>
             <div class="flex flex-col md:flex-row justify-between mt-4 text-xs font-bold gap-3">
@@ -124,7 +146,7 @@
 
         <div id="loadingArea" class="hidden flex flex-col items-center justify-center py-24 glass-card mb-10">
             <div class="loading-spinner mb-6"></div>
-            <p class="text-indigo-600 text-sm font-bold animate-pulse">기상 데이터 및 궤도를 분석 중입니다...</p>
+            <p class="text-indigo-600 text-sm font-bold animate-pulse">데이터 및 기상정보를 분석 중입니다...</p>
         </div>
 
         <div id="contentArea" class="space-y-8"></div>
@@ -132,8 +154,8 @@
 
     <script>
         const DEFAULT_NAME = "마산 삼계초등학교";
-        const DEFAULT_LAT = 35.2341;
-        const DEFAULT_LNG = 128.5085;
+        const DEFAULT_LAT = 35.2321;
+        const DEFAULT_LNG = 128.5005;
         
         let currentStation = 'ALL';
         let currentPeriod = 7;
@@ -142,9 +164,14 @@
         let activeScenes = [];
         let savedLocations = [];
         let editingLocId = null;
+        let currentRenderedPasses = []; 
 
         let realtimeMap, issMarker, cssMarker, observerMarker;
         let issOrbitLayer, cssOrbitLayer, issFootprint, cssFootprint;
+        let locSelectionMap = null, locSelectionMarker = null; 
+        
+        let passDetailMap = null, passMapLayers = L.layerGroup(); 
+        
         let globalTles = { ISS: null, CSS: null };
         let trackingInterval = null; 
         let globalRenderer, isAnimating = false;
@@ -163,14 +190,33 @@
             if (overlay) overlay.style.opacity = '0';
             setTimeout(() => { 
                 if (overlay) overlay.style.display = 'none'; 
-                fetchCurrentLocation(true); 
+                loadInitialLocation(); 
             }, 400);
         }
 
         function closeOverlayOnly() {
             const overlay = document.getElementById('startOverlay');
             if (overlay) overlay.style.display = 'none';
-            fetchCurrentLocation(true);
+            loadInitialLocation();
+        }
+
+        function loadInitialLocation() {
+            const laInput = document.getElementById('locLat');
+            const loInput = document.getElementById('locLng');
+            const naInput = document.getElementById('locName');
+            
+            if (savedLocations.length > 0) {
+                const loc = savedLocations[0];
+                if (laInput) laInput.value = loc.lat;
+                if (loInput) loInput.value = loc.lng;
+                if (naInput) naInput.value = loc.name;
+                showToast(`저장된 '${loc.name}' 위치를 불러왔습니다.`);
+            } else {
+                if (laInput) laInput.value = DEFAULT_LAT;
+                if (loInput) loInput.value = DEFAULT_LNG;
+                if (naInput) naInput.value = DEFAULT_NAME;
+            }
+            updateData();
         }
 
         function getGlobalRenderer() {
@@ -201,15 +247,19 @@
             observerMarker = L.marker([DEFAULT_LAT, DEFAULT_LNG], {icon: obsIcon}).addTo(realtimeMap);
         }
 
-        function getSatLatLng(tle) {
+        function getSatLatLngAtTime(tle, date) {
             if (!tle) return null;
             try {
-                const satrec = satellite.twoline2satrec(tle[0], tle[1]), now = new Date();
-                const pv = satellite.propagate(satrec, now);
+                const satrec = satellite.twoline2satrec(tle[0], tle[1]);
+                const pv = satellite.propagate(satrec, date);
                 if (!pv.position) return null;
-                const gmst = satellite.gstime(now), gd = satellite.eciToGeodetic(pv.position, gmst);
+                const gmst = satellite.gstime(date), gd = satellite.eciToGeodetic(pv.position, gmst);
                 return { lat: satellite.degreesLat(gd.latitude), lng: satellite.degreesLong(gd.longitude), alt: gd.height };
             } catch (e) { return null; }
+        }
+
+        function getSatLatLng(tle) {
+            return getSatLatLngAtTime(tle, new Date());
         }
 
         function getFootprintRadius(altKm) {
@@ -284,9 +334,7 @@
                         visibility: data.hourly.visibility[idx]
                     }));
                 }
-            } catch (e) { 
-                console.error("기상 정보를 가져오는 중 오류 발생:", e); 
-            }
+            } catch (e) { console.error("기상 정보 획득 실패:", e); }
             return [];
         }
 
@@ -332,42 +380,77 @@
                 </div>`;
         }
 
-        function fetchCurrentLocation(isAuto = false) {
-            const laInput = document.getElementById('locLat');
-            const loInput = document.getElementById('locLng');
-            const naInput = document.getElementById('locName');
-
-            const fallback = () => {
-                if (isAuto) {
-                    if (laInput) laInput.value = DEFAULT_LAT;
-                    if (loInput) loInput.value = DEFAULT_LNG;
-                    if (naInput) naInput.value = DEFAULT_NAME;
-                    updateData();
-                }
-            };
-
+        function fetchCurrentLocation() {
             if (!navigator.geolocation) {
                 showToast("GPS를 지원하지 않는 브라우저입니다.", "red");
-                fallback();
                 return;
             }
-
             showToast("현재 위치를 요청 중입니다...", "blue");
             navigator.geolocation.getCurrentPosition((p) => {
-                if (laInput) laInput.value = p.coords.latitude.toFixed(4);
-                if (loInput) loInput.value = p.coords.longitude.toFixed(4);
-                if (naInput && (!naInput.value || naInput.value.includes("새 위치"))) naInput.value = "현재 내 위치";
+                const la = document.getElementById('locLat'), lo = document.getElementById('locLng'), na = document.getElementById('locName');
+                if (la) la.value = p.coords.latitude.toFixed(4);
+                if (lo) lo.value = p.coords.longitude.toFixed(4);
+                if (na && (!na.value || na.value.includes("새 위치"))) na.value = "현재 내 위치";
                 showToast("위치 정보를 가져왔습니다.");
-                updateData();
+                
+                if (locSelectionMap && locSelectionMarker) {
+                    const latlng = [p.coords.latitude, p.coords.longitude];
+                    locSelectionMap.setView(latlng, 10);
+                    locSelectionMarker.setLatLng(latlng);
+                }
             }, (err) => {
                 showToast("위치 접근 권한이 거부되었습니다.", "red");
-                fallback();
             }, { timeout: 10000 });
         }
 
         function toggleLocationSettings() {
             const p = document.getElementById('locationSettingsPanel');
-            if (p) p.classList.toggle('hidden');
+            if (p) {
+                p.classList.toggle('hidden');
+                if (!p.classList.contains('hidden')) {
+                    setTimeout(() => {
+                        initSelectionMap();
+                        const lat = parseFloat(document.getElementById('locLat').value) || DEFAULT_LAT;
+                        const lng = parseFloat(document.getElementById('locLng').value) || DEFAULT_LNG;
+                        locSelectionMap.setView([lat, lng], 7);
+                        if (locSelectionMarker) {
+                            locSelectionMarker.setLatLng([lat, lng]);
+                        } else {
+                            const obsIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="w-4 h-4 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>', iconSize: [16, 16] });
+                            locSelectionMarker = L.marker([lat, lng], {icon: obsIcon}).addTo(locSelectionMap);
+                        }
+                    }, 100);
+                }
+            }
+        }
+
+        function initSelectionMap() {
+            if (locSelectionMap) {
+                locSelectionMap.invalidateSize();
+                return;
+            }
+            locSelectionMap = L.map('locSelectionMap', { attributionControl: false, zoomControl: true }).setView([DEFAULT_LAT, DEFAULT_LNG], 6);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 18, minZoom: 5 }).addTo(locSelectionMap);
+
+            locSelectionMap.on('click', function(e) {
+                const lat = e.latlng.lat.toFixed(4);
+                const lng = e.latlng.lng.toFixed(4);
+                
+                document.getElementById('locLat').value = lat;
+                document.getElementById('locLng').value = lng;
+                
+                const naInput = document.getElementById('locName');
+                if (!naInput.value || naInput.value.includes("새 위치") || naInput.value.includes("현재 내 위치") || naInput.value.includes("지도에서 선택한 위치") || naInput.value === DEFAULT_NAME) {
+                    naInput.value = getNextAutoName();
+                }
+
+                if (locSelectionMarker) {
+                    locSelectionMarker.setLatLng(e.latlng);
+                } else {
+                    const obsIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="w-4 h-4 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>', iconSize: [16, 16] });
+                    locSelectionMarker = L.marker(e.latlng, {icon: obsIcon}).addTo(locSelectionMap);
+                }
+            });
         }
 
         function applyInputLocation() { 
@@ -380,33 +463,95 @@
         function setNewLocation() { 
             const na = document.getElementById('locName'), la = document.getElementById('locLat'), lo = document.getElementById('locLng');
             if (na) na.value = getNextAutoName(); if (la) la.value = ''; if (lo) lo.value = ''; 
+            editingLocId = null;
+            document.getElementById('txtSaveLoc').innerText = "저장";
             showToast("입력창을 비웠습니다.");
         }
         
         function getNextAutoName() {
             const names = savedLocations.map(l => l.name);
-            let n = 1; while (names.includes(`새 위치 ${n}`)) n++;
-            return `새 위치 ${n}`;
+            let n = 1; while (names.includes(`새 위치${n}`)) n++;
+            return `새 위치${n}`;
         }
 
         function saveLocation() {
             const na = document.getElementById('locName'), la = document.getElementById('locLat'), lo = document.getElementById('locLng');
             if (!na || !la || !lo) return;
-            const name = na.value.trim(), lat = la.value, lng = lo.value;
-            if (!name || !lat || !lng) { showToast("이름과 좌표를 입력하세요.", "red"); return; }
-            savedLocations.push({ id: Date.now().toString(), name, lat: parseFloat(lat), lng: parseFloat(lng) });
+            const name = na.value.trim(), lat = parseFloat(la.value), lng = parseFloat(lo.value);
+            if (!name || isNaN(lat) || isNaN(lng)) { showToast("이름과 좌표를 올바르게 입력하세요.", "red"); return; }
+            
+            if (editingLocId) {
+                const idx = savedLocations.findIndex(l => l.id === editingLocId);
+                if (idx !== -1) savedLocations[idx] = { id: editingLocId, name, lat, lng };
+                editingLocId = null;
+                document.getElementById('txtSaveLoc').innerText = "저장";
+                showToast("위치가 수정되었습니다.");
+            } else {
+                if (savedLocations.length >= 3) {
+                    showToast("최대 3개까지만 저장 가능합니다. 기존 위치를 삭제해주세요.", "red");
+                    return;
+                }
+                savedLocations.push({ id: Date.now().toString(), name, lat, lng });
+                showToast("위치를 저장했습니다.");
+            }
+            
             localStorage.setItem('spaceTrackerLocations', JSON.stringify(savedLocations)); 
             renderSavedLocations(); 
-            showToast("현재 위치를 저장했습니다.");
+        }
+
+        function useLocation(id) {
+            const loc = savedLocations.find(l => l.id === id);
+            if (loc) {
+                document.getElementById('locLat').value = loc.lat;
+                document.getElementById('locLng').value = loc.lng;
+                document.getElementById('locName').value = loc.name;
+                applyInputLocation();
+            }
+        }
+
+        function editLocation(id) {
+            const loc = savedLocations.find(l => l.id === id);
+            if (loc) {
+                document.getElementById('locLat').value = loc.lat;
+                document.getElementById('locLng').value = loc.lng;
+                document.getElementById('locName').value = loc.name;
+                editingLocId = id;
+                document.getElementById('txtSaveLoc').innerText = "수정";
+                showToast("내용을 수정하고 저장 버튼을 누르세요.", "blue");
+                
+                if (locSelectionMap && locSelectionMarker) {
+                    locSelectionMap.setView([loc.lat, loc.lng], 10);
+                    locSelectionMarker.setLatLng([loc.lat, loc.lng]);
+                }
+            }
+        }
+
+        function deleteLocation(id) {
+            savedLocations = savedLocations.filter(l => l.id !== id);
+            localStorage.setItem('spaceTrackerLocations', JSON.stringify(savedLocations));
+            renderSavedLocations();
+            showToast("위치가 삭제되었습니다.");
         }
 
         function renderSavedLocations() {
             const c = document.getElementById('savedLocationsContainer');
             if (!c) return;
-            c.innerHTML = savedLocations.slice(-3).map(l => `
-                <div class="saved-loc-card shadow-sm hover:shadow-md" onclick="document.getElementById('locLat').value='${l.lat}';document.getElementById('locLng').value='${l.lng}';document.getElementById('locName').value='${l.name}';updateData();">
-                    <div class="text-sm font-bold truncate">${l.name}</div>
-                    <div class="text-[10px] text-slate-400">${l.lat}, ${l.lng}</div>
+            
+            if (savedLocations.length === 0) {
+                c.innerHTML = `<div class="col-span-3 text-center text-xs text-slate-400 py-2">저장된 위치가 없습니다. 최대 3개까지 저장 가능합니다.</div>`;
+                return;
+            }
+
+            c.innerHTML = savedLocations.map(l => `
+                <div class="saved-loc-card flex justify-between items-center bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all">
+                    <div class="cursor-pointer flex-1 overflow-hidden" onclick="useLocation('${l.id}')">
+                        <div class="text-sm font-bold truncate text-slate-800">${l.name}</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">${l.lat}, ${l.lng}</div>
+                    </div>
+                    <div class="flex gap-1 ml-2">
+                        <button onclick="editLocation('${l.id}')" class="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="수정"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteLocation('${l.id}')" class="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="삭제"><i class="fas fa-trash"></i></button>
+                    </div>
                 </div>
             `).join('');
         }
@@ -424,16 +569,25 @@
                 if (!r.ok) throw new Error("TLE API Error");
                 const t = await r.text();
                 const ls = t.split('\n').map(x => x.trim()).filter(x => x.length > 0);
+                
                 for(let k = 0; k < ls.length; k++) {
-                    if(ls[k].includes("ISS (ZARYA)")) iss = [ls[k+1], ls[k+2]];
-                    if((ls[k].includes("TIANGONG") || ls[k].includes("CSS")) && !css) {
-                        // 유효한 TLE 형식인지 확인 (1번 라인, 2번 라인 시작 확인)
-                        if (ls[k+1] && ls[k+1].startsWith("1 ") && ls[k+2] && ls[k+2].startsWith("2 ")) {
-                            css = [ls[k+1], ls[k+2]];
-                        }
-                    }
+                    if (ls[k].startsWith("1 25544U")) iss = [ls[k], ls[k+1]];
+                    if (ls[k].startsWith("1 48274U")) css = [ls[k], ls[k+1]];
                 }
             } catch (e) { console.error("TLE Fetch Error:", e); }
+
+            if (!css) {
+                try {
+                    const r2 = await fetch("https://celestrak.org/NORAD/elements/gp.php?CATNR=48274&FORMAT=tle");
+                    if (r2.ok) {
+                        const t2 = await r2.text();
+                        const ls2 = t2.split('\n').map(x => x.trim()).filter(x => x.length > 0);
+                        if (ls2.length >= 2 && ls2[0].startsWith("1 48274U")) css = [ls2[0], ls2[1]];
+                        else if (ls2.length >= 3 && ls2[1].startsWith("1 48274U")) css = [ls2[1], ls2[2]];
+                    }
+                } catch (e) { console.error("CSS Fallback Fetch Error:", e); }
+            }
+
             if (!iss) iss = ["1 25544U 98067A   24131.54714120  .00016717  00000-0  30177-3 0  9990", "2 25544  51.6416  20.8954 0004817  70.7416  30.4093 15.49845345454315"];
             if (!css) css = ["1 48274U 21035A   24131.53692882  .00010000  00000-0  10000-3 0  9990", "2 48274  41.4723 151.7412 0001432  85.7412 274.3521 15.58912345172635"];
             return { iss, css };
@@ -463,14 +617,14 @@
                         }
                         t += 10000;
                     }
-                    if (s && e && m && vis > 0 && maxEl >= 10) ps.push(formatPass({ start: s, max: m, end: e }, type));
+                    if (s && e && m && vis > 0 && maxEl >= 10) ps.push(formatPass({ start: s, max: m, end: e }, type, tle, lat, lng));
                     t += 2400000;
                 } else t += 60000;
             }
             return ps;
         }
 
-        function formatPass(p, type) {
+        function formatPass(p, type, tle, obsLat, obsLng) {
             const d = p.max.time, week = ['일', '월', '화', '수', '목', '금', '토'];
             const ft = (t) => {
                 const h = t.getHours().toString().padStart(2, '0'), m = t.getMinutes().toString().padStart(2, '0'), s = t.getSeconds().toString().padStart(2, '0');
@@ -481,7 +635,25 @@
                 const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
                 return dirs[Math.floor((az / 22.5) + 0.5) % 16];
             };
-            return { type, date: `${d.getMonth()+1}월 ${d.getDate()}일 (${week[d.getDay()]})`, startTime: ft(p.start.time).long, endTime: ft(p.end.time).long, peakTime: ft(p.max.time).long, alt: p.max.el.toFixed(1), dir: `${getAzStr(p.start.az)} -> ${getAzStr(p.end.az)}`, duration: `${Math.floor(ds/60)}분 ${ds%60}초`, timestamp: p.start.time.getTime(), mag: (type === 'ISS' ? -3.5 : -1.0 + (90 - p.max.el)*0.02).toFixed(1) };
+            
+            return { 
+                type, 
+                date: `${d.getMonth()+1}월 ${d.getDate()}일 (${week[d.getDay()]})`, 
+                startTime: ft(p.start.time).long, 
+                endTime: ft(p.end.time).long, 
+                peakTime: ft(p.max.time).long, 
+                alt: p.max.el.toFixed(1), 
+                dir: `${getAzStr(p.start.az)} -> ${getAzStr(p.end.az)}`, 
+                duration: `${Math.floor(ds/60)}분 ${ds%60}초`, 
+                timestamp: p.start.time.getTime(), 
+                mag: (type === 'ISS' ? -3.5 : -1.0 + (90 - p.max.el)*0.02).toFixed(1),
+                rawStartMs: p.start.time.getTime(),
+                rawEndMs: p.end.time.getTime(),
+                rawPeakMs: p.max.time.getTime(),
+                tle: tle,
+                obsLat: obsLat,
+                obsLng: obsLng
+            };
         }
 
         async function updateData() {
@@ -489,10 +661,13 @@
             const laInput = document.getElementById('locLat'), loInput = document.getElementById('locLng');
             if (!laInput || !loInput) return;
             
-            const la = parseFloat(laInput.value) || DEFAULT_LAT;
-            const ln = parseFloat(loInput.value) || DEFAULT_LNG;
+            const la = laInput.value ? parseFloat(laInput.value) : DEFAULT_LAT;
+            const ln = loInput.value ? parseFloat(loInput.value) : DEFAULT_LNG;
             
-            if (document.getElementById('headerLocDesc')) document.getElementById('headerLocDesc').innerText = `${la}, ${ln}`;
+            if (document.getElementById('headerLocDesc')) {
+                const n = document.getElementById('locName').value || DEFAULT_NAME;
+                document.getElementById('headerLocDesc').innerText = `${n} (${la}, ${ln})`;
+            }
             if (observerMarker) observerMarker.setLatLng([la, ln]);
             
             if (b) b.disabled = true; if (i) i.classList.add('fa-spin'); 
@@ -527,87 +702,279 @@
             const c = document.getElementById('contentArea');
             if (!c) return;
             let ps = currentStation === 'ALL' ? [...allData.ISS, ...allData.CSS] : allData[currentStation];
-            if (ps.length === 0) { c.innerHTML = "<div class='glass-card p-12 text-center text-slate-500 font-bold'>선택한 기간 내 관측 가능한 일정이 없습니다.</div>"; return; }
-            ps.sort((a, b) => a.timestamp - b.timestamp);
-            c.innerHTML = ps.map((p, idx) => `
+            
+            currentRenderedPasses = ps.sort((a, b) => a.timestamp - b.timestamp);
+
+            if (currentRenderedPasses.length === 0) { 
+                c.innerHTML = "<div class='glass-card p-12 text-center text-slate-500 font-bold'>선택한 기간 내 관측 가능한 일정이 없습니다.</div>"; 
+                return; 
+            }
+            
+            c.innerHTML = currentRenderedPasses.map((p, idx) => `
                 <div class="glass-card pass-card mb-8">
                     <div class="flex flex-col lg:flex-row">
-                        <div class="p-8 lg:w-3/5 border-b lg:border-b-0 lg:border-r border-slate-100">
-                            <div class="flex justify-between items-start mb-6">
-                                <div>
-                                    <span class="px-2 py-0.5 rounded ${p.type === 'ISS' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'} text-[10px] font-black uppercase tracking-widest mr-2">${p.type}</span>
-                                    <span class="text-indigo-600 font-bold text-xs uppercase">${p.date}</span>
-                                    <h4 class="text-slate-800 text-3xl md:text-5xl font-black mt-2 tracking-tight">${p.startTime} <span class="block text-xl text-slate-400 font-medium mt-2">~ <span class="text-yellow-500">${p.endTime}</span> <span class="text-base text-slate-300">(${p.duration})</span></span></h4>
+                        <div class="p-8 lg:w-3/5 border-b lg:border-b-0 lg:border-r border-slate-100 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start mb-6">
+                                    <div>
+                                        <span class="px-2 py-0.5 rounded ${p.type === 'ISS' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'} text-[10px] font-black uppercase tracking-widest mr-2">${p.type}</span>
+                                        <span class="text-indigo-600 font-bold text-xs uppercase">${p.date}</span>
+                                        <h4 class="text-slate-800 text-3xl md:text-5xl font-black mt-2 tracking-tight">${p.startTime} <span class="block text-xl text-slate-400 font-medium mt-2">~ <span class="text-yellow-500">${p.endTime}</span> <span class="text-base text-slate-300">(${p.duration})</span></span></h4>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="mb-2">${getWeatherUI(p.timestamp)}</div>
+                                        <span class="text-2xl font-black text-indigo-500">${p.mag <= 0 ? p.mag : '+' + p.mag}</span>
+                                        <div class="text-[10px] text-slate-400 font-bold uppercase">Mag</div>
+                                    </div>
                                 </div>
-                                <div class="text-right">
-                                    <div class="mb-2">${getWeatherUI(p.timestamp)}</div>
-                                    <span class="text-2xl font-black text-indigo-500">${p.mag <= 0 ? p.mag : '+' + p.mag}</span>
-                                    <div class="text-[10px] text-slate-400 font-bold uppercase">Mag</div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2 uppercase">Max Altitude</span><span class="text-2xl text-slate-800 font-black">${p.alt}°</span><div class="text-[10px] text-orange-500 mt-2 font-bold">정점: ${p.peakTime}</div></div>
+                                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2 uppercase">Direction</span><span class="text-sm text-slate-800 font-bold">${p.dir}</span></div>
                                 </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2 uppercase">Max Altitude</span><span class="text-2xl text-slate-800 font-black">${p.alt}°</span><div class="text-[10px] text-orange-500 mt-2 font-bold">정점: ${p.peakTime}</div></div>
-                                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100"><span class="text-[10px] text-slate-400 font-black block mb-2 uppercase">Direction</span><span class="text-sm text-slate-800 font-bold">${p.dir}</span></div>
+                            
+                            <div class="mt-6 pt-6 border-t border-slate-100">
+                                <button onclick="showPassMap(${idx})" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3.5 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-md">
+                                    <i class="fas fa-map-marked-alt text-lg"></i> 지도에서 관측 범위 보기
+                                </button>
                             </div>
                         </div>
                         <div class="lg:w-2/5 relative bg-slate-50 overflow-hidden"><div id="chart-3d-${idx}" class="three-container"></div></div>
                     </div>
                 </div>`).join('');
-            setTimeout(() => ps.forEach((p, i) => {
-                const ds = p.dir.split('->').map(x => x.trim());
-                init3DScene(`chart-3d-${i}`, ds[0], ds[1], parseFloat(p.alt), p.startTime, p.endTime, p.peakTime);
+                
+            setTimeout(() => currentRenderedPasses.forEach((p, i) => {
+                init3DScene(`chart-3d-${i}`, p);
             }), 100);
         }
 
+        // --- 상세 궤도 지도 시각화 (2D) ---
+        function getBearingForSwath(lat1, lng1, lat2, lng2) {
+            const l1 = lat1 * Math.PI / 180, l2 = lat2 * Math.PI / 180, dl = (lng2 - lng1) * Math.PI / 180;
+            const y = Math.sin(dl) * Math.cos(l2), x = Math.cos(l1) * Math.sin(l2) - Math.sin(l1) * Math.cos(l2) * Math.cos(dl);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        function getDestPointForSwath(lat, lng, bearing, distKm) {
+            const R = 6371, d = distKm / R, lat1 = lat * Math.PI / 180, lon1 = lng * Math.PI / 180, brng = bearing * Math.PI / 180;
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+            let lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+            return [lat2 * 180 / Math.PI, ((lon2 * 180 / Math.PI + 540) % 360 - 180)];
+        }
+
+        function showPassMap(idx) {
+            const p = currentRenderedPasses[idx];
+            const modal = document.getElementById('passMapModal');
+            const content = document.getElementById('passMapModalContent');
+            
+            document.getElementById('passMapTitle').innerHTML = `<i class="fas fa-satellite ${p.type === 'ISS' ? 'text-blue-500' : 'text-red-500'} mr-2"></i> ${p.type} 관측 궤도 범위 (${p.date} ${p.startTime})`;
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            void modal.offsetWidth;
+            modal.classList.remove('opacity-0');
+            content.classList.remove('scale-95');
+            
+            if (!passDetailMap) {
+                passDetailMap = L.map('passDetailMap', { attributionControl: false, zoomControl: true });
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 18, minZoom: 2 }).addTo(passDetailMap);
+                passMapLayers.addTo(passDetailMap);
+            }
+            
+            setTimeout(() => {
+                passDetailMap.invalidateSize();
+                drawPassDetails(p);
+            }, 300);
+        }
+
+        function closePassMap() {
+            const modal = document.getElementById('passMapModal');
+            const content = document.getElementById('passMapModalContent');
+            
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        }
+
+        function drawPassDetails(p) {
+            passMapLayers.clearLayers();
+            const color = p.type === 'ISS' ? '#3b82f6' : '#ef4444';
+            
+            const obsIcon = L.divIcon({ className: 'custom-div-icon', html: '<div class="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-md"></div>', iconSize: [16, 16] });
+            L.marker([p.obsLat, p.obsLng], {icon: obsIcon}).addTo(passMapLayers);
+            
+            const peakPos = getSatLatLngAtTime(p.tle, new Date(p.rawPeakMs));
+            if (peakPos) {
+                const obsRadius = getFootprintRadius(peakPos.alt);
+                L.circle([p.obsLat, p.obsLng], { radius: obsRadius, color: '#22c55e', weight: 2, dashArray: '5,10', fill: false }).addTo(passMapLayers);
+                
+                const satIcon = L.divIcon({ className: 'custom-div-icon', html: `<div class="flex items-center justify-center w-8 h-8 ${p.type === 'ISS' ? 'bg-blue-500' : 'bg-red-500'} rounded-full border-2 border-white shadow-lg text-white text-xs"><i class="fas ${p.type === 'ISS' ? 'fa-globe' : 'fa-rocket'}"></i></div>`, iconSize: [32, 32] });
+                L.marker([peakPos.lat, peakPos.lng], {icon: satIcon}).addTo(passMapLayers).bindTooltip("정점 (최대 고도)", {permanent: true, direction: "top", className: 'font-bold text-xs bg-white/90 backdrop-blur-sm border-none shadow-sm'}).openTooltip();
+            }
+
+            let segments = [];
+            let curLefts = [], curRights = [], curCenters = [];
+            let prevLng = null;
+            
+            let st = p.rawStartMs - 4 * 60000; 
+            let et = p.rawEndMs + 4 * 60000; 
+            const satrec = satellite.twoline2satrec(p.tle[0], p.tle[1]);
+            
+            for (let t = st; t <= et; t += 10000) {
+                const date = new Date(t);
+                const pv = satellite.propagate(satrec, date);
+                if (!pv.position) continue;
+                const gmst = satellite.gstime(date), gd = satellite.eciToGeodetic(pv.position, gmst);
+                const lat = satellite.degreesLat(gd.latitude), lng = satellite.degreesLong(gd.longitude);
+                
+                if (prevLng !== null && Math.abs(lng - prevLng) > 90) {
+                    segments.push({ lefts: curLefts, rights: curRights, centers: curCenters });
+                    curLefts = []; curRights = []; curCenters = [];
+                }
+                
+                curCenters.push([lat, lng]);
+                
+                const nd = new Date(t + 10000);
+                const npv = satellite.propagate(satrec, nd);
+                let brng = 0;
+                if (npv.position) {
+                    const ngd = satellite.eciToGeodetic(npv.position, satellite.gstime(nd));
+                    brng = getBearingForSwath(lat, lng, satellite.degreesLat(ngd.latitude), satellite.degreesLong(ngd.longitude));
+                }
+                
+                // 궤도 띠 반경 (시각적으로 잘 보이도록 25km 두께로 설정)
+                const distKm = 25; 
+                curLefts.push(getDestPointForSwath(lat, lng, brng - 90, distKm));
+                curRights.push(getDestPointForSwath(lat, lng, brng + 90, distKm));
+                
+                prevLng = lng;
+            }
+            segments.push({ lefts: curLefts, rights: curRights, centers: curCenters });
+            
+            segments.forEach(seg => {
+                if (seg.centers.length > 0) {
+                    const ring = [...seg.lefts, ...seg.rights.reverse()];
+                    L.polygon(ring, {color: color, weight: 1, fillColor: color, fillOpacity: 0.35, interactive: false}).addTo(passMapLayers);
+                    L.polyline(seg.centers, {color: color, weight: 3, opacity: 0.8}).addTo(passMapLayers);
+                }
+            });
+
+            passDetailMap.setView([p.obsLat, p.obsLng], 6);
+        }
+
+        // --- 물리 기반 정확한 3D 궤도 챠트 시각화 ---
         function createTextSprite(t, c, f) {
             const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
             canvas.width = 300; canvas.height = 120; ctx.fillStyle = c; ctx.font = `bold ${f}px Pretendard`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, 150, 60);
             const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) })); sprite.scale.set(4.5, 1.8, 1); return sprite;
         }
 
-        function init3DScene(id, sD, eD, maxA, startTime, endTime, peakTime) {
+        function init3DScene(id, p) {
             const container = document.getElementById(id); if (!container) return;
             const canvas2d = document.createElement('canvas'); canvas2d.style.width = canvas2d.style.height = '100%'; canvas2d.style.position = 'absolute'; canvas2d.style.top = canvas2d.style.left = '0'; container.appendChild(canvas2d);
             const ctx = canvas2d.getContext('2d'), r = getGlobalRenderer(), scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 1000);
             cam.position.set(0, 10, 15); cam.lookAt(0, 0, 0);
             const wg = new THREE.Group(); scene.add(wg); wg.add(new THREE.GridHelper(16, 8, 0x94a3b8, 0xcbd5e1));
+            
             const addL = (txt, pos) => { const l = createTextSprite(txt, 'rgba(71, 85, 105, 0.6)', 40); l.position.copy(pos); wg.add(l); };
             addL('N', new THREE.Vector3(0,0,-9)); addL('S', new THREE.Vector3(0,0,9)); addL('E', new THREE.Vector3(9,0,0)); addL('W', new THREE.Vector3(-9,0,0));
-            const centerAlt = createTextSprite(`${maxA}°`, '#1e293b', 72); centerAlt.position.set(0, 0.5, 0); wg.add(centerAlt);
 
-            const mapAz = { 'N':0, 'NNE':22.5, 'NE':45, 'ENE':67.5, 'E':90, 'ESE':112.5, 'SE':135, 'SSE':157.5, 'S':180, 'SSW':202.5, 'SW':225, 'WSW':247.5, 'W':270, 'WNW':292.5, 'NW':315, 'NNW':337.5 };
-            const sa = (mapAz[sD.toUpperCase()] - 90)*(Math.PI/180), ea = (mapAz[eD.toUpperCase()] - 90)*(Math.PI/180), pa = (sa+ea)/2, R = 8;
-            const gp = (a, alt) => new THREE.Vector3(R*Math.cos(alt*Math.PI/180)*Math.cos(a), R*Math.sin(alt*Math.PI/180), R*Math.cos(alt*Math.PI/180)*Math.sin(a));
+            // 물리 시뮬레이션 기반의 완벽한 3D 곡선 계산 로직 (관측 위치 기준)
+            const satrec = satellite.twoline2satrec(p.tle[0], p.tle[1]);
+            const obs = { longitude: p.obsLng*Math.PI/180, latitude: p.obsLat*Math.PI/180, height: 0.1 };
+            const R = 8;
             
-            const p1 = gp(sa, 10), pPeak = gp(pa, maxA), p3 = gp(ea, 10);
-            const curve = new THREE.CatmullRomCurve3([p1, pPeak, p3]);
-            const curvePoints = curve.getPoints(60);
-            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curvePoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2 }));
+            const get3DPosAtTime = (timeMs) => {
+                const date = new Date(timeMs);
+                const pv = satellite.propagate(satrec, date);
+                if (!pv.position) return new THREE.Vector3(0,0,0);
+                const gmst = satellite.gstime(date);
+                const ecf = satellite.eciToEcf(pv.position, gmst);
+                const fl = satellite.ecfToLookAngles(obs, ecf);
+                return new THREE.Vector3(
+                    R * Math.cos(fl.elevation) * Math.sin(fl.azimuth),
+                    R * Math.sin(fl.elevation),
+                    -R * Math.cos(fl.elevation) * Math.cos(fl.azimuth)
+                );
+            };
+
+            const curvePoints = [];
+            const steps = 40;
+            const dt = (p.rawEndMs - p.rawStartMs) / steps;
+            
+            for(let i = 0; i <= steps; i++) {
+                curvePoints.push(get3DPosAtTime(p.rawStartMs + i*dt));
+            }
+            
+            const curve = new THREE.CatmullRomCurve3(curvePoints);
+            const highResPoints = curve.getPoints(60);
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(highResPoints), new THREE.LineDashedMaterial({ color: 0x4f46e5, dashSize: 0.4, gapSize: 0.2 }));
             line.computeLineDistances(); wg.add(line);
+
+            // 관측자 위치(원점) 마커 생성
+            const obsPos = new THREE.Vector3(0, 0, 0);
+            const obsDot = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x22c55e }));
+            wg.add(obsDot);
+            const obsLabel = createTextSprite("관측자", "#22c55e", 24);
+            obsLabel.position.set(0, -0.6, 0);
+            wg.add(obsLabel);
+
+            // 주요 지점(정점, 시작점, 끝점) 계산
+            const pPeak = get3DPosAtTime(p.rawPeakMs);
+            const p1 = curvePoints[0];
+            const p3 = curvePoints[curvePoints.length - 1];
+
+            // 관측자에서 정점까지의 주황색 점선 연결 및 고도(각도) 텍스트 표시
+            const peakLineGeom = new THREE.BufferGeometry().setFromPoints([obsPos, pPeak]);
+            const peakLineMat = new THREE.LineDashedMaterial({ color: 0xf59e0b, dashSize: 0.3, gapSize: 0.2 });
+            const peakLine = new THREE.Line(peakLineGeom, peakLineMat);
+            peakLine.computeLineDistances();
+            wg.add(peakLine);
+
+            // 시각적 이해도를 높이기 위한 바닥 보조선 (직각 삼각형 형태)
+            const pGround = new THREE.Vector3(pPeak.x, 0, pPeak.z);
+            const groundLineGeom = new THREE.BufferGeometry().setFromPoints([obsPos, pGround, pPeak]);
+            const groundLineMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 0.2, gapSize: 0.2 });
+            const groundLine = new THREE.Line(groundLineGeom, groundLineMat);
+            groundLine.computeLineDistances();
+            wg.add(groundLine);
+
+            // 관측자 쪽에 각도 표시(호) 그리기
+            const maxAngleRad = maxA * Math.PI / 180;
+            const arcRadius = 1.8; // 관측자로부터 각도 호까지의 거리
+            const arcPoints = [];
+            const vecGround = pGround.clone().normalize();
+            const vecPeak = pPeak.clone().normalize();
+            
+            // 회전축 계산 (바닥 벡터와 정점 벡터에 수직)
+            const axis = new THREE.Vector3().crossVectors(vecGround, vecPeak).normalize();
+            if (axis.lengthSq() < 0.001) axis.set(1, 0, 0); // 90도 수직일 경우 예외 처리
+
+            for (let i = 0; i <= 20; i++) {
+                const theta = (i / 20) * maxAngleRad;
+                const pt = vecGround.clone().applyAxisAngle(axis, theta).multiplyScalar(arcRadius);
+                arcPoints.push(pt);
+            }
+            
+            const arcGeom = new THREE.BufferGeometry().setFromPoints(arcPoints);
+            const arcMat = new THREE.LineBasicMaterial({ color: 0xf59e0b });
+            const angleArc = new THREE.Line(arcGeom, arcMat);
+            wg.add(angleArc);
+
+            // 각도 텍스트를 각도 표시선(호) 바로 옆에 배치
+            const midTheta = maxAngleRad / 2;
+            const labelPos = vecGround.clone().applyAxisAngle(axis, midTheta).multiplyScalar(arcRadius + 0.8);
+            const altLabel = createTextSprite(`${maxA}°`, '#f59e0b', 50);
+            altLabel.position.copy(labelPos);
+            wg.add(altLabel);
 
             const pb = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({ color: 0xf59e0b })); pb.position.copy(pPeak); wg.add(pb);
             const peakLabel = createTextSprite(peakTime, '#f59e0b', 34); peakLabel.position.set(pPeak.x, pPeak.y + 1, pPeak.z); wg.add(peakLabel);
-            const p1Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x3b82f6 })); p1Dot.position.copy(p1); wg.add(p1Dot);
-            const startLabel = createTextSprite(startTime, '#3b82f6', 28); startLabel.position.set(p1.x, p1.y - 1, p1.z); wg.add(startLabel);
-            const p3Dot = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({ color: 0x64748b })); p3Dot.position.copy(p3); wg.add(p3Dot);
-            const endLabel = createTextSprite(endTime, '#64748b', 28); endLabel.position.set(p3.x, p3.y - 1, p3.z); wg.add(endLabel);
-
-            [15, 45].forEach(idx => {
-                const pos = curvePoints[idx]; const nextPos = curvePoints[idx+1];
-                const dir = new THREE.Vector3().subVectors(nextPos, pos).normalize();
-                const arrow = new THREE.ArrowHelper(dir, pos, 1.2, 0x4f46e5, 0.4, 0.3); wg.add(arrow);
-            });
-
-            const s = { container, canvas2d, ctx, scene, camera: cam, worldGroup: wg, targetRotY: 0, prevX: 0, isDragging: false };
-            const onDown = (x) => { s.isDragging = true; s.prevX = x; };
-            const onMove = (x) => { if (s.isDragging) { s.targetRotY += (x - s.prevX) * 0.015; s.prevX = x; } };
-            const onUp = () => { s.isDragging = false; };
-            container.addEventListener('mousedown', (e) => onDown(e.clientX));
-            window.addEventListener('mousemove', (e) => onMove(e.clientX));
-            window.addEventListener('mouseup', onUp);
-            container.addEventListener('touchstart', (e) => onDown(e.touches[0].clientX));
-            window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX));
-            window.addEventListener('touchend', onUp);
             activeScenes.push(s);
         }
 
